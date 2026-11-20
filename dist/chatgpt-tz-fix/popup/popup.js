@@ -517,28 +517,85 @@
   };
 
   /** 查询出口 IP 与归属地。失败时返回 {ok:false}，绝不抛错。 */
-  function detectExitIp() {
-    var endpoints = [
-      'https://ipinfo.io/json',
-      'https://api.ipify.org?format=json'
-    ];
+  /*
+   * 查询出口 IP 与归属地。
+   *
+   * 踩过的坑：
+   *   1. api.ipify.org 只返回 IP，**没有 country 字段** —— 早期把它当备选，
+   *      导致 ipinfo 失败时页面显示 "IP · ??" 且无法匹配时区。
+   *   2. ipinfo 对部分 IP（私有段/保留段/新分配段）会返回 bogon:true 且不带 country。
+   *   3. 有些接口需要走不同域名才能绕过地区限制。
+   *
+   * 所以这里按「是否真的拿到 country」来判断成功，而不是「有没有响应」。
+   */
+  var IP_ENDPOINTS = [
+    {
+      url: 'https://ipinfo.io/json',
+      parse: function (d) { return { ip: d.ip, country: d.country, region: d.region, city: d.city }; }
+    },
+    {
+      // Cloudflare trace：纯文本，稳定且有 loc 字段（国家代码）
+      url: 'https://www.cloudflare.com/cdn-cgi/trace',
+      parse: function (text) {
+        var map = {};
+        String(text).split('\n').forEach(function (line) {
+          var i = line.indexOf('=');
+          if (i > 0) map[line.slice(0, i)] = line.slice(i + 1);
+        });
+        return { ip: map.ip, country: map.loc, region: '', city: '' };
+      },
+      isText: true
+    },
+    {
+      // ip-api：字段名不同（countryCode / query）
+      url: 'https://ip-api.com/json/?fields=status,country,countryCode,regionName,city,query',
+      parse: function (d) {
+        if (d.status && d.status !== 'success') return {};
+        return { ip: d.query, country: d.countryCode, region: d.regionName, city: d.city };
+      }
+    },
+    {
+      // 兜底：只有 IP，没有国家。仅用于显示，绝不用于匹配时区
+      url: 'https://api.ipify.org?format=json',
+      parse: function (d) { return { ip: d.ip, country: '', region: '', city: '' }; }
+    }
+  ];
 
-    function tryNext(i) {
-      if (i >= endpoints.length) return Promise.resolve({ ok: false, error: '查询失败' });
-      return fetch(endpoints[i], { cache: 'no-store' })
+  function detectExitIp() {
+    function tryNext(i, fallbackIp) {
+      if (i >= IP_ENDPOINTS.length) {
+        // 一个都没拿到国家，但至少有 IP 的话也返回，界面会提示手动选
+        if (fallbackIp) return Promise.resolve({ ok: true, ip: fallbackIp, country: '', region: '', city: '', countryUnknown: true });
+        return Promise.resolve({ ok: false, error: '所有 IP 查询接口均失败' });
+      }
+
+      var ep = IP_ENDPOINTS[i];
+      return fetch(ep.url, { cache: 'no-store' })
         .then(function (res) {
           if (!res.ok) throw new Error('HTTP ' + res.status);
-          return res.json();
+          return ep.isText ? res.text() : res.json();
         })
-        .then(function (data) {
-          var ip = data.ip || '';
-          var country = (data.country || '').toUpperCase();
+        .then(function (raw) {
+          var info = ep.parse(raw) || {};
+          var ip = info.ip || '';
+          var country = String(info.country || '').toUpperCase();
           if (!ip) throw new Error('无 IP 字段');
-          return { ok: true, ip: ip, country: country, region: data.region || '', city: data.city || '' };
+          if (!country) {
+            // 拿到 IP 但没国家：记下来继续试下一个接口
+            return tryNext(i + 1, fallbackIp || ip);
+          }
+          return {
+            ok: true,
+            ip: ip,
+            country: country,
+            region: info.region || '',
+            city: info.city || '',
+            source: ep.url
+          };
         })
-        .catch(function () { return tryNext(i + 1); });
+        .catch(function () { return tryNext(i + 1, fallbackIp); });
     }
-    return tryNext(0);
+    return tryNext(0, '');
   }
 
   /** 把国家代码映射成时区；没有映射时返回 null */
@@ -565,17 +622,26 @@
       return;
     }
 
-    var country = info.country || '??';
+    var country = info.country || '';
     var suggested = zoneForCountry(country);
     var currentZone = state.settings ? state.settings.zone : '';
     var match = suggested && suggested === currentZone;
 
-    ui.ipValue.textContent = info.ip + ' · ' + country + (info.city ? ' ' + info.city : '');
+    // 国家未知时不要显示 "??" 这种让人困惑的东西
+    var locText = country ? (info.city ? country + ' ' + info.city : country) : '未知地区';
+    ui.ipValue.textContent = info.ip + ' · ' + locText;
+
+    if (info.countryUnknown || !country) {
+      ui.ipRow.className = 'ip-row warn';
+      ui.ipHint.className = 'ip-hint warn';
+      ui.ipHint.textContent = '查到了 IP 但识别不出地区（可能是私有地址或被接口限流），请手动选择时区';
+      return;
+    }
 
     if (!suggested) {
       ui.ipRow.className = 'ip-row';
       ui.ipHint.className = 'ip-hint';
-      ui.ipHint.textContent = '这个地区没有预置时区映射，请手动选择接近的时区';
+      ui.ipHint.textContent = '该地区（' + country + '）暂无预置时区映射，请手动选择接近的时区';
       return;
     }
 
