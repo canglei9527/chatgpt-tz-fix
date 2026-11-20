@@ -29,27 +29,39 @@ function rel(p) { return path.relative(ROOT, p).replace(/\\/g, '/'); }
 function exists(p) { try { return fs.statSync(p).isFile(); } catch (e) { return false; } }
 
 /* ---------- 1. 拷贝注入脚本 ---------- */
-function copyShim() {
-  if (!exists(SHIM_SRC)) {
-    fail('缺少核心脚本 src/tz-shim.js');
+/** 把一个 src 脚本拷进 extension/inject/，加生成横幅并做安全检查 */
+function stageInjectScript(srcPath, dstPath, label) {
+  if (!exists(srcPath)) {
+    fail('缺少源脚本：' + rel(srcPath));
     return;
   }
-  const source = fs.readFileSync(SHIM_SRC, 'utf8');
+  const source = fs.readFileSync(srcPath, 'utf8');
   const banner = [
     '/*',
-    ' * ⚠ 本文件由 tools/build.cjs 从 src/tz-shim.js 自动生成，请勿直接修改。',
-    ' * 修改请编辑 src/tz-shim.js 后重新运行：node tools/build.cjs',
+    ' * ⚠ 本文件由 tools/build.cjs 从 ' + rel(srcPath) + ' 自动生成，请勿直接修改。',
+    ' * 修改请编辑 ' + rel(srcPath) + ' 后重新运行：node tools/build.cjs',
     ' */'
   ].join('\n');
-  fs.mkdirSync(path.dirname(SHIM_DST), { recursive: true });
-  fs.writeFileSync(SHIM_DST, banner + '\n' + source, 'utf8');
-  notes.push('注入脚本已生成：' + rel(SHIM_DST) + '（' + Buffer.byteLength(source, 'utf8') + ' 字节）');
 
-  const banned = [/\beval\s*\(/, /new\s+Function\s*\(/];
-  banned.forEach(function (re) {
-    if (re.test(source)) fail('src/tz-shim.js 含 CSP 不安全写法：' + re);
+  fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+  fs.writeFileSync(dstPath, banner + '\n' + source, 'utf8');
+  notes.push(label + '已生成：' + rel(dstPath) + '（' + Buffer.byteLength(source, 'utf8') + ' 字节）');
+
+  [/\beval\s*\(/, /new\s+Function\s*\(/].forEach(function (re) {
+    if (re.test(source)) fail(rel(srcPath) + ' 含 CSP 不安全写法：' + re);
   });
-  if (/^\s*(import|export)\s/m.test(source)) fail('src/tz-shim.js 不能使用 ES module 语法（内容脚本以 classic script 注入）');
+  if (/^\s*(import|export)\s/m.test(source)) {
+    fail(rel(srcPath) + ' 不能使用 ES module 语法（内容脚本以 classic script 注入）');
+  }
+}
+
+function copyShim() {
+  stageInjectScript(SHIM_SRC, SHIM_DST, '注入脚本');
+  stageInjectScript(
+    path.join(ROOT, 'src', 'webrtc-guard.js'),
+    path.join(EXT, 'inject', 'webrtc-guard.js'),
+    'WebRTC 防护脚本'
+  );
 }
 
 /* ---------- 2. 校验扩展结构 ---------- */

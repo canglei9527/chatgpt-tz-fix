@@ -41,6 +41,7 @@
         "verify/verify-bootstrap.js",
         "verify/verify-fingerprint.js",
         "inject/tz-shim.js",
+        "inject/webrtc-guard.js",
         "inject/zones/*.js"
       ],
       "matches": [

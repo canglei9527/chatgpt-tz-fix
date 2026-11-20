@@ -239,6 +239,42 @@ chatgpt-tz-fix/
 
 ---
 
+## 六点六、WebRTC 本机 IP 防泄露（可选）
+
+如果你的目的是「让网站以为我在美国」，时区只是其中一个信号。**WebRTC 会泄露你的真实 IP**，比时区更容易被识破。
+
+### 问题是什么
+
+WebRTC 建立连接前会收集「候选地址」，其中两类携带你的真实位置：
+
+| 候选类型 | 含义 | 风险 |
+| :--- | :--- | :--- |
+| `typ host` | 本机网卡地址（192.168.x.x / 10.x.x.x） | 暴露内网结构 |
+| `typ srflx` | NAT 映射后的**公网 IP** | **绕过代理暴露真实 IP** |
+| `typ relay` | TURN 中继服务器地址 | 安全，与代理出口一致 |
+
+网页只要列一遍 `candidates` 就能拿到 `typ srflx` 里的真实 IP —— 即使你挂着美国节点，它看到的仍是中国 IP。
+
+### 本扩展怎么处理
+
+弹窗里新增「**屏蔽 WebRTC 本机 IP**」开关（默认关闭）。打开后：
+
+- 过滤 `onicecandidate` 和 `addEventListener('icecandidate')` 两条路径，丢弃 `host` / `srflx`
+- 清洗 `localDescription` / `currentLocalDescription` / `pendingLocalDescription` 的 SDP，剔除对应 `a=candidate` 行
+- **保留 `typ relay`**，不影响正常连通性
+
+### 为什么不强制走中继
+
+强制中继（`iceTransportPolicy: 'relay'`）需要可用的 TURN 服务器，没有的话 WebRTC 直接不可用（视频通话会挂）。本扩展用的是**过滤模式**：连接在浏览器内部照常建立，只是页面 JS 拿不到能定位你的候选。
+
+### 什么时候该打开
+
+- ✅ 你挂着代理，且希望网站看到的位置和出口 IP 一致
+- ✅ 你在意真实 IP 不被网页拿到
+- ⚠️ 关闭它：某些网站的音视频功能异常时，可先关掉这个开关排查
+
+---
+
 ## 七、常见问题
 
 **Q：安装后没效果？**

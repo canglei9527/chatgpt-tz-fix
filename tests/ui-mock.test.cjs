@@ -212,6 +212,23 @@ async function testBackground() {
   assert('所有网站范围使用 <all_urls>', regAll.matches.length === 1 && regAll.matches[0] === '<all_urls>', JSON.stringify(regAll.matches));
   assert('切换时区后注入文件同步变化', regAll.js[0] === 'inject/zones/asia_tokyo.js', JSON.stringify(regAll.js));
 
+  /*
+   * WebRTC 防护是可选项：关闭时注入列表只有 2 个文件，
+   * 打开时中间多一个 inject/webrtc-guard.js，且必须排在 tz-shim 之前。
+   */
+  assert('默认关闭 WebRTC 防护（注入 2 个文件）',
+    regAll.js.length === 2 && regAll.js.indexOf('inject/webrtc-guard.js') < 0,
+    JSON.stringify(regAll.js));
+
+  await bg.ensureRegistered({ enabled: true, zone: 'America/Los_Angeles', scope: 'chatgpt', webrtc: true, v: 1 });
+  const regWrtc = mock.calls.register[mock.calls.register.length - 1][0];
+  assert('开启 WebRTC 后注入 3 个文件',
+    regWrtc.js.length === 3 && regWrtc.js.indexOf('inject/webrtc-guard.js') === 1,
+    JSON.stringify(regWrtc.js));
+  assert('WebRTC 脚本排在 tz-shim 之前',
+    regWrtc.js[1] === 'inject/webrtc-guard.js' && regWrtc.js[2] === 'inject/tz-shim.js',
+    JSON.stringify(regWrtc.js));
+
   // 校验
   assert('拒绝非法时区', !!bg.validatePatch({ zone: 'Not/AZone' }));
   assert('拒绝非法范围', !!bg.validatePatch({ scope: 'nope' }));

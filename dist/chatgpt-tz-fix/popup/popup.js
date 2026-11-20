@@ -33,6 +33,7 @@
     zoneSelect: null,
     savedHint: null,
     scopeSegment: null,
+    webrtcToggle: null,
     btnCheck: null,
     btnReload: null,
     btnOpen: null,
@@ -127,6 +128,10 @@
     ui.realZone.textContent = realZone;
     ui.maskZone.textContent = zoneLabel(s.zone);
     ui.maskZone.title = s.zone;
+
+    if (ui.webrtcToggle) {
+      ui.webrtcToggle.checked = !!s.webrtc;
+    }
 
     var scopeButtons = ui.scopeSegment.querySelectorAll('[data-scope]');
     for (var i = 0; i < scopeButtons.length; i += 1) {
@@ -448,6 +453,16 @@
     });
   }
 
+  function bindWebrtc() {
+    if (!ui.webrtcToggle) return;
+    ui.webrtcToggle.addEventListener('change', function () {
+      var on = ui.webrtcToggle.checked;
+      handlePatch({ webrtc: on }, {
+        message: on ? '已开启 WebRTC 防护，刷新页面后生效' : '已关闭 WebRTC 防护，刷新页面后生效'
+      });
+    });
+  }
+
   function activeTab() {
     return new Promise(function (resolve) {
       try {
@@ -571,6 +586,7 @@
     ui.zoneSelect = document.getElementById('zoneSelect');
     ui.savedHint = document.getElementById('savedHint');
     ui.scopeSegment = document.getElementById('scopeSegment');
+    ui.webrtcToggle = document.getElementById('webrtcToggle');
     ui.btnCheck = document.getElementById('btnCheck');
     ui.btnReload = document.getElementById('btnReload');
     ui.btnOpen = document.getElementById('btnOpen');
@@ -585,6 +601,7 @@
     bindToggle();
     bindZoneSelect();
     bindScope();
+    bindWebrtc();
     bindActions();
 
     if (ui.version) {

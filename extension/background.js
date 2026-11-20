@@ -9,7 +9,14 @@ const SCRIPT_ID = 'tz-main';
 const INJECT_FILES = ['inject/zones/ZONE_SLUG.js', 'inject/tz-shim.js'];
 
 /** 默认设置（chrome.storage.local 单 key） */
-const DEFAULT_STATE = Object.freeze({ v: 1, enabled: true, zone: 'America/Los_Angeles', scope: 'chatgpt' });
+const DEFAULT_STATE = Object.freeze({
+  v: 1,
+  enabled: true,
+  zone: 'America/Los_Angeles',
+  scope: 'chatgpt',
+  // WebRTC 本机 IP 防泄露：默认关闭，避免影响视频通话类站点；用户可在弹窗里打开
+  webrtc: false
+});
 /** 允许的生效范围 */
 const SCOPES = Object.freeze(['chatgpt', 'all']);
 /** 各范围对应的 matches */
@@ -49,7 +56,8 @@ function normalizeState(input) {
   const zone = typeof source.zone === 'string' && findZone(source.zone) ? source.zone : DEFAULT_STATE.zone;
   const scope = SCOPES.includes(source.scope) ? source.scope : DEFAULT_STATE.scope;
   const enabled = typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_STATE.enabled;
-  return { v: DEFAULT_STATE.v, enabled, zone, scope };
+  const webrtc = typeof source.webrtc === 'boolean' ? source.webrtc : DEFAULT_STATE.webrtc;
+  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc };
 }
 
 /** 单条校验：返回错误文案，通过返回 null */
@@ -57,6 +65,7 @@ function validatePatch(patch) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return '参数格式不正确';
   if ('enabled' in patch && typeof patch.enabled !== 'boolean') return 'enabled 必须是布尔值';
   if ('scope' in patch && !SCOPES.includes(patch.scope)) return '不支持的生效范围：' + String(patch.scope);
+  if ('webrtc' in patch && typeof patch.webrtc !== 'boolean') return 'webrtc 必须是布尔值';
   if ('zone' in patch && !findZone(patch.zone)) return '未知时区：' + String(patch.zone);
   return null;
 }
@@ -118,10 +127,21 @@ function resolveMatches(scope) {
 }
 
 /** 当前状态对应的注入文件列表 */
-function resolveFiles(zone) {
+/**
+ * 计算要注入的文件列表。
+ *
+ * 顺序很关键：
+ *   1. zones/<slug>.js  —— 先放好目标时区变量
+ *   2. webrtc-guard.js  —— 可选，屏蔽会泄露真实 IP 的 ICE 候选
+ *   3. tz-shim.js       —— 最后装时区伪装
+ */
+function resolveFiles(zone, webrtc) {
   const entry = findZone(zone);
   const slug = entry ? entry.slug : 'america_los_angeles';
-  return [INJECT_FILES[0].replace('ZONE_SLUG', slug), INJECT_FILES[1]];
+  const files = [INJECT_FILES[0].replace('ZONE_SLUG', slug)];
+  if (webrtc) files.push('inject/webrtc-guard.js');
+  files.push(INJECT_FILES[1]);
+  return files;
 }
 
 /** 注销内容脚本；not-found 属于正常情况，直接忽略 */
@@ -190,7 +210,7 @@ async function applyRegistration(stateInput) {
   }
 
   const matches = resolveMatches(state.scope);
-  const files = resolveFiles(state.zone);
+  const files = resolveFiles(state.zone, state.webrtc);
   lastRegistration.files = files;
   lastRegistration.matches = matches;
 

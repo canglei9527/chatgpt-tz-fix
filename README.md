@@ -250,6 +250,42 @@ Also worth knowing:
 
 ---
 
+## WebRTC local-IP leak protection (optional)
+
+If your goal is "make the site think I'm in the US", timezone is only one signal. **WebRTC leaks your real IP**, which is easier to spot than the timezone.
+
+### The problem
+
+Before connecting, WebRTC gathers ICE "candidates". Two kinds carry your real location:
+
+| Candidate type | Meaning | Risk |
+| :--- | :--- | :--- |
+| `typ host` | Local network interface (192.168.x.x / 10.x.x.x) | Exposes internal network shape |
+| `typ srflx` | Public IP after NAT | **Leaks your real IP, bypassing the proxy** |
+| `typ relay` | TURN relay server address | Safe — same region as your proxy exit |
+
+Any page can enumerate `candidates` and read the real IP out of `typ srflx` — even while you're on a US node.
+
+### What this extension does
+
+The popup has a **"Block WebRTC local IP"** toggle (off by default). When on:
+
+- Filters both `onicecandidate` and `addEventListener('icecandidate')`, dropping `host` / `srflx`
+- Sanitizes the SDP of `localDescription` / `currentLocalDescription` / `pendingLocalDescription`, removing matching `a=candidate` lines
+- **Keeps `typ relay`**, so connectivity is unaffected
+
+### Why not force relay-only
+
+`iceTransportPolicy: 'relay'` requires a working TURN server; without one, WebRTC simply stops working (video calls break). This extension uses **filtering** instead: connections are established normally inside the browser, but page JS can no longer see candidates that pin down your real IP.
+
+### When to enable it
+
+- ✅ You're behind a proxy and want the site's view of your location to match your exit IP
+- ✅ You don't want pages to obtain your real IP
+- ⚠️ Leave it off if a site's audio/video breaks — toggle this first when debugging
+
+---
+
 ## FAQ
 
 **Nothing happens after installing.**
