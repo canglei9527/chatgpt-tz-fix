@@ -55,6 +55,17 @@
       <h2>伪装时区</h2>
       <span class="saved-hint" id="savedHint"></span>
     </div>
+
+    <!-- 出口 IP 一致性：时区应该和代理所在地匹配，否则反而是风控信号 -->
+    <div class="ip-row" id="ipRow">
+      <div class="ip-info">
+        <span class="ip-label">出口 IP</span>
+        <span class="ip-value" id="ipValue">未检测</span>
+      </div>
+      <button id="btnDetectIp" class="btn ghost sm" type="button">跟随代理</button>
+    </div>
+    <p class="ip-hint" id="ipHint">点「跟随代理」自动把时区设成与你出口 IP 一致</p>
+
     <div class="search-wrap">
       <input id="zoneSearch" class="search" type="search" placeholder="搜索时区，例如 洛杉矶 / tokyo" autocomplete="off" spellcheck="false">
     </div>

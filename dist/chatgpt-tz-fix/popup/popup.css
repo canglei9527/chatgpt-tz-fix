@@ -397,3 +397,42 @@ html, body {
 .switch.small .switch-track { width: 34px; height: 20px; }
 .switch.small .switch-thumb { width: 16px; height: 16px; }
 .switch.small input:checked + .switch-track .switch-thumb { transform: translateX(14px); }
+
+/* ---------- 出口 IP 一致性 ---------- */
+
+.ip-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.ip-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ip-label { font-size: 10.5px; color: var(--fg-mute); }
+.ip-value {
+  font-size: 12px;
+  color: var(--fg-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ip-row.ok { background: var(--green-soft); border-color: transparent; }
+.ip-row.ok .ip-value { color: var(--green); }
+.ip-row.warn { background: var(--amber-soft); border-color: transparent; }
+.ip-row.warn .ip-value { color: var(--amber); }
+.ip-row.bad { background: var(--red-soft); border-color: transparent; }
+.ip-row.bad .ip-value { color: var(--red); }
+
+.ip-hint {
+  margin: 0 0 8px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--fg-mute);
+}
+.ip-hint.warn { color: var(--amber); }
+.ip-hint.bad { color: var(--red); }

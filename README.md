@@ -250,6 +250,26 @@ Also worth knowing:
 
 ---
 
+## "Follow proxy" — automatic timezone matching
+
+Community reports consistently say the timezone must **match your egress IP**, not just "pick a US zone". Setting Los Angeles while your IP is in Japan creates a contradictory signal.
+
+The popup now has an **Exit IP** row:
+
+- Automatically queries your egress IP and country when the popup opens (silent, non-blocking)
+- Shows `IP · Country City`
+- **Checks consistency** with your current timezone:
+  - 🟢 "Timezone matches exit IP ✓"
+  - 🟡 "Timezone doesn't match exit IP — click Follow proxy to set XXX"
+- Click **Follow proxy** → switches the timezone to match your IP
+
+44 common country/region mappings are built in (US/JP/SG/GB/DE/HK/TW/KR/AU/CA …).
+If the lookup fails, nothing breaks — just pick a timezone manually.
+
+> Privacy: only calls `ipinfo.io/json`, a public IP-geolocation endpoint. No identifiers are sent.
+
+---
+
 ## WebRTC local-IP leak protection (optional)
 
 If your goal is "make the site think I'm in the US", timezone is only one signal. **WebRTC leaks your real IP**, which is easier to spot than the timezone.

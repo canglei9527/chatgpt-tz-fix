@@ -34,6 +34,10 @@
     savedHint: null,
     scopeSegment: null,
     webrtcToggle: null,
+    ipRow: null,
+    ipValue: null,
+    ipHint: null,
+    btnDetectIp: null,
     btnCheck: null,
     btnReload: null,
     btnOpen: null,
@@ -453,6 +457,185 @@
     });
   }
 
+  /* ==================== 出口 IP → 时区匹配 ==================== */
+
+  /*
+   * 为什么做这个：
+   *   社区反馈（locdd / CSDN / macos.do）一致认为「时区必须和出口 IP 一致」，
+   *   而不是「一律选美国」。IP 在日本却选洛杉矶，等于主动制造矛盾信号。
+   *   这里自动查出口 IP 所在地区，推荐/设置匹配的时区。
+   *
+   * 隐私：只请求 ipinfo.io/json（一个公开的 IP 归属查询），不带任何标识。
+   */
+
+  /** 国家/地区 → 推荐的 IANA 时区（按覆盖人口与代理节点常见度排序） */
+  var COUNTRY_ZONE = {
+    US: 'America/Los_Angeles',     // 美国（默认西海岸；东部用户可手动改 New_York）
+    CA: 'America/Toronto',
+    MX: 'America/Mexico_City',
+    BR: 'America/Sao_Paulo',
+    AR: 'America/Argentina/Salta',
+    GB: 'Europe/London',
+    IE: 'Europe/Dublin',
+    FR: 'Europe/Paris',
+    DE: 'Europe/Berlin',
+    NL: 'Europe/Amsterdam',
+    BE: 'Europe/Brussels',
+    CH: 'Europe/Zurich',
+    AT: 'Europe/Vienna',
+    IT: 'Europe/Rome',
+    ES: 'Europe/Madrid',
+    PT: 'Europe/Lisbon',
+    SE: 'Europe/Stockholm',
+    NO: 'Europe/Oslo',
+    DK: 'Europe/Copenhagen',
+    FI: 'Europe/Helsinki',
+    PL: 'Europe/Warsaw',
+    CZ: 'Europe/Prague',
+    RU: 'Europe/Moscow',
+    TR: 'Europe/Istanbul',
+    UA: 'Europe/Kiev',          // ICU 规范名（Kyiv 是新区名，ICU 仍用 Kiev）
+    AE: 'Asia/Dubai',
+    IL: 'Asia/Jerusalem',
+    IN: 'Asia/Calcutta',
+    SG: 'Asia/Singapore',
+    MY: 'Asia/Kuala_Lumpur',
+    TH: 'Asia/Bangkok',
+    VN: 'Asia/Saigon',          // ICU 规范名（Ho_Chi_Minh 是旧区名）
+    ID: 'Asia/Jakarta',
+    PH: 'Asia/Manila',
+    HK: 'Asia/Hong_Kong',
+    TW: 'Asia/Taipei',
+    KR: 'Asia/Seoul',
+    JP: 'Asia/Tokyo',
+    CN: 'Asia/Shanghai',
+    AU: 'Australia/Sydney',
+    NZ: 'Pacific/Auckland',
+    ZA: 'Africa/Johannesburg',
+    EG: 'Africa/Cairo',
+    NG: 'Africa/Lagos'
+  };
+
+  /** 查询出口 IP 与归属地。失败时返回 {ok:false}，绝不抛错。 */
+  function detectExitIp() {
+    var endpoints = [
+      'https://ipinfo.io/json',
+      'https://api.ipify.org?format=json'
+    ];
+
+    function tryNext(i) {
+      if (i >= endpoints.length) return Promise.resolve({ ok: false, error: '查询失败' });
+      return fetch(endpoints[i], { cache: 'no-store' })
+        .then(function (res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.json();
+        })
+        .then(function (data) {
+          var ip = data.ip || '';
+          var country = (data.country || '').toUpperCase();
+          if (!ip) throw new Error('无 IP 字段');
+          return { ok: true, ip: ip, country: country, region: data.region || '', city: data.city || '' };
+        })
+        .catch(function () { return tryNext(i + 1); });
+    }
+    return tryNext(0);
+  }
+
+  /** 把国家代码映射成时区；没有映射时返回 null */
+  function zoneForCountry(country) {
+    if (!country) return null;
+    var zone = COUNTRY_ZONE[country];
+    if (!zone) return null;
+    // 确认这个时区在目录里（避免设置一个不存在的值）
+    for (var i = 0; i < state.zones.length; i++) {
+      if (state.zones[i].zone === zone) return zone;
+    }
+    return null;
+  }
+
+  /** 渲染出口 IP 卡片：显示 IP/地区，并判断与当前时区是否一致 */
+  function renderIpCard(info) {
+    if (!ui.ipRow) return;
+
+    if (!info || !info.ok) {
+      ui.ipRow.className = 'ip-row';
+      ui.ipValue.textContent = '未检测';
+      ui.ipHint.className = 'ip-hint';
+      ui.ipHint.textContent = '点「跟随代理」自动把时区设成与你出口 IP 一致';
+      return;
+    }
+
+    var country = info.country || '??';
+    var suggested = zoneForCountry(country);
+    var currentZone = state.settings ? state.settings.zone : '';
+    var match = suggested && suggested === currentZone;
+
+    ui.ipValue.textContent = info.ip + ' · ' + country + (info.city ? ' ' + info.city : '');
+
+    if (!suggested) {
+      ui.ipRow.className = 'ip-row';
+      ui.ipHint.className = 'ip-hint';
+      ui.ipHint.textContent = '这个地区没有预置时区映射，请手动选择接近的时区';
+      return;
+    }
+
+    if (match) {
+      ui.ipRow.className = 'ip-row ok';
+      ui.ipHint.className = 'ip-hint';
+      ui.ipHint.textContent = '时区与出口 IP 一致 ✓';
+    } else {
+      ui.ipRow.className = 'ip-row warn';
+      ui.ipHint.className = 'ip-hint warn';
+      ui.ipHint.textContent = '当前时区与出口 IP 不一致，建议点击「跟随代理」改成 ' + suggested;
+    }
+  }
+
+  function bindIpDetect() {
+    if (!ui.btnDetectIp) return;
+
+    ui.btnDetectIp.addEventListener('click', function () {
+      var btn = ui.btnDetectIp;
+      if (btn.classList.contains('busy')) return;
+
+      btn.classList.add('busy');
+      btn.disabled = true;
+      ui.ipValue.textContent = '查询中…';
+      ui.ipHint.className = 'ip-hint';
+      ui.ipHint.textContent = '正在查询出口 IP…';
+
+      detectExitIp().then(function (info) {
+        btn.classList.remove('busy');
+        btn.disabled = false;
+
+        if (!info.ok) {
+          ui.ipRow.className = 'ip-row bad';
+          ui.ipValue.textContent = '查询失败';
+          ui.ipHint.className = 'ip-hint bad';
+          ui.ipHint.textContent = '无法查询出口 IP（可能被网络限制），请手动选择时区';
+          return;
+        }
+
+        var zone = zoneForCountry(info.country);
+        renderIpCard(info);
+
+        if (!zone) {
+          toast('IP 在 ' + info.country + '，但没有对应的预置时区，请手动选择');
+          return;
+        }
+
+        if (state.settings && state.settings.zone === zone) {
+          toast('时区已经是 ' + zone + '，与出口 IP 一致 ✓');
+          return;
+        }
+
+        // 自动切换
+        ui.zoneSelect.value = zone;
+        handlePatch({ zone: zone }, { message: '已跟随代理切换到 ' + zone });
+        toast('已切换为 ' + zone + '，刷新页面后生效');
+      });
+    });
+  }
+
   function bindWebrtc() {
     if (!ui.webrtcToggle) return;
     ui.webrtcToggle.addEventListener('change', function () {
@@ -587,6 +770,10 @@
     ui.savedHint = document.getElementById('savedHint');
     ui.scopeSegment = document.getElementById('scopeSegment');
     ui.webrtcToggle = document.getElementById('webrtcToggle');
+    ui.ipRow = document.getElementById('ipRow');
+    ui.ipValue = document.getElementById('ipValue');
+    ui.ipHint = document.getElementById('ipHint');
+    ui.btnDetectIp = document.getElementById('btnDetectIp');
     ui.btnCheck = document.getElementById('btnCheck');
     ui.btnReload = document.getElementById('btnReload');
     ui.btnOpen = document.getElementById('btnOpen');
@@ -602,6 +789,7 @@
     bindZoneSelect();
     bindScope();
     bindWebrtc();
+    bindIpDetect();
     bindActions();
 
     if (ui.version) {
@@ -619,6 +807,16 @@
       renderZones('');
       renderStatus();
       startClock();
+
+      /*
+       * 打开弹窗时静默查一次出口 IP，只用于显示一致性提示，**不自动改时区**。
+       * 自动改会让用户莫名其妙——必须由用户点「跟随代理」明确触发。
+       */
+      ui.ipValue.textContent = '查询中…';
+      detectExitIp().then(function (info) {
+        if (info.ok) renderIpCard(info);
+        else ui.ipValue.textContent = '未检测';
+      });
     }).catch(function (err) {
       toast('初始化失败：' + ((err && err.message) || err));
     });

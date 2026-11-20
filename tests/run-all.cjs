@@ -18,6 +18,7 @@ const SUITES = [
   { file: 'tests/ui-mock.test.cjs', name: '扩展外壳（manifest / background / popup）' },
   { file: 'tests/verify-page.test.cjs', name: '自检页参考算法 vs 浏览器原生' },
   { file: 'tests/webrtc-guard.test.cjs', name: 'WebRTC 本机 IP 防泄露' },
+  { file: 'tests/ip-zone-map.test.cjs', name: '出口 IP → 时区映射' },
   { file: 'tests/shim-selfcheck.cjs', name: '伪装脚本 vs 真身差分对拍' }
 ];
 
