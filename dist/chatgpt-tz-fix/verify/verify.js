@@ -840,10 +840,24 @@
     row('系统真实时区', (meta.realZone || hostZone) + '　（Chrome 进程时区）', true);
     row('本页时区', hostZone + (state.hostPolluted ? '　⚠ 本页已被伪装，参考值不可靠' : '　（未被伪装，可作参考基准）'), true);
     row('扩展版本', String(meta.version || '—'), true);
-    row('内容脚本', meta.scriptRegistered ? '已注册' : '未注册', true);
 
-    var ok = s.enabled && !state.hostPolluted;
-    setTag('envStatusTag', ok ? 'ok' : 'warn', ok ? '可以开始自检' : (s.enabled ? '参考基准受污染' : '扩展已关闭'));
+    /*
+     * 内容脚本注册状态是最容易出问题的一环：注册失败时如果只显示"未注册"，
+     * 用户完全不知道该查什么。这里把后台记录的真实原因一并展示。
+     */
+    if (meta.scriptRegistered) {
+      row('内容脚本', '已注册 ✓', true);
+    } else {
+      row('内容脚本', '未注册 ✗', true);
+      row('注册失败原因', String(meta.registrationError || '未知（后台未记录错误）'), true);
+    }
+
+    var ok = s.enabled && !state.hostPolluted && meta.scriptRegistered;
+    var tagKind = ok ? 'ok' : (s.enabled && !meta.scriptRegistered ? 'bad' : 'warn');
+    var tagText = ok
+      ? '可以开始自检'
+      : (!meta.scriptRegistered ? '内容脚本未注册' : (s.enabled ? '参考基准受污染' : '扩展已关闭'));
+    setTag('envStatusTag', tagKind, tagText);
   }
 
   function buildReport() {
@@ -953,6 +967,20 @@
         setTag('engineStatusTag', 'warn', '扩展已关闭');
         $('engineHint').className = 'hint err';
         $('engineHint').textContent = '扩展当前处于关闭状态，页面不会被伪装；请先在扩展弹窗中开启。';
+        renderReport();
+        return;
+      }
+      /*
+       * 内容脚本没注册时，"标签页实测"必然是失败的。
+       * 这里先把根因说清楚，避免用户反复刷新页面却永远不生效。
+       */
+      if (!state.meta || !state.meta.scriptRegistered) {
+        setTag('engineStatusTag', 'warn', '脚本未注册');
+        $('engineHint').className = 'hint err';
+        var why = (state.meta && state.meta.registrationError) || '未知原因';
+        $('engineHint').textContent =
+          '内容脚本没有注册成功，页面不会被伪装。后台记录的失败原因：' + why +
+          '。请到 chrome://extensions 点扩展的「详情」查看错误，或点下方「复制」把诊断信息发给开发者。';
         renderReport();
         return;
       }

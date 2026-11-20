@@ -1,0 +1,5 @@
+== 构建 ChatGPT 时区修复扩展 ==
+  · 注入脚本已生成：extension/inject/tz-shim.js（50195 字节）
+  · 时区文件：419/419 与 shared/zones.js 一致
+
+✓ 构建通过。

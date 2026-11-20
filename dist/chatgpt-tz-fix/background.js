@@ -66,6 +66,13 @@ function validatePatch(patch) {
 let lastKnownState = null;
 
 /**
+ * 最近一次注册失败的原因。
+ * 早期实现只 console.warn 就返回 false，用户在界面上只看到"未生效"，
+ * 完全查不到是权限问题、参数问题还是浏览器版本问题。这里留痕，供 getState/diagnose 上报。
+ */
+const lastRegistration = { ok: false, error: null, at: null, files: null, matches: null };
+
+/**
  * 读取设置。
  *
  * 关键：读失败 ≠ 没有设置。
@@ -182,28 +189,43 @@ async function applyRegistration(stateInput) {
     return false;
   }
 
+  const matches = resolveMatches(state.scope);
+  const files = resolveFiles(state.zone);
+  lastRegistration.files = files;
+  lastRegistration.matches = matches;
+
   try {
     await chrome.scripting.registerContentScripts([
       {
         id: SCRIPT_ID,
-        matches: resolveMatches(state.scope),
-        files: resolveFiles(state.zone),
+        matches,
+        files,
         runAt: 'document_start',
         world: 'MAIN',
         allFrames: true,
         persistAcrossSessions: true,
       },
     ]);
+    lastRegistration.ok = true;
+    lastRegistration.error = null;
+    lastRegistration.at = Date.now();
     await updateBadge(true);
     return true;
   } catch (err) {
     const message = String((err && err.message) || err);
+    lastRegistration.at = Date.now();
+
     // 重复注册：说明状态已经是对的（并发场景），不需要再报错
     if (/duplicate|already exists/i.test(message)) {
+      lastRegistration.ok = true;
+      lastRegistration.error = null;
       await updateBadge(true);
       return true;
     }
-    console.warn('[tz-fix] 注册内容脚本失败：', message);
+
+    lastRegistration.ok = false;
+    lastRegistration.error = message;
+    console.warn('[tz-fix] 注册内容脚本失败：' + message);
     return false;
   }
 }
@@ -307,15 +329,33 @@ async function handleMessage(message, sender) {
   switch (message.type) {
     case 'getState': {
       const read = await readStateChecked();
+
+      /*
+       * 自愈：如果脚本没注册，这里补一次。
+       *
+       * MV3 的 service worker 并非每次唤醒都会触发 onInstalled/onStartup——
+       * 例如用户点了扩展页的"重新加载"，或 SW 因消息被唤醒时，
+       * 这两个事件都不会触发，init() 也就不会跑，内容脚本永远是"未注册"状态。
+       * 打开弹窗/自检页必然走到这里，是补注册最可靠的时机。
+       */
+      let registered = await isScriptRegistered();
+      if (!registered && read.state.enabled) {
+        registered = await ensureRegistered(read.state);
+        if (registered) registered = await isScriptRegistered();
+      }
+
       return {
         ok: true,
         state: read.state,
-        // readOk=false 时 popup 可以提示"设置读取异常，显示的可能不是当前配置"
         meta: {
           realZone: getRealZone(),
           version: chrome.runtime.getManifest().version,
-          scriptRegistered: await isScriptRegistered(),
+          scriptRegistered: registered,
           readOk: read.ok,
+          // 注册失败时的真实原因，界面可直接展示
+          registrationError: registered ? null : (lastRegistration.error || '未注册'),
+          files: lastRegistration.files,
+          matches: lastRegistration.matches,
         },
       };
     }
@@ -339,6 +379,47 @@ async function handleMessage(message, sender) {
       lastKnownState = next;
       await ensureRegistered(next);
       return { ok: true, state: next };
+    }
+    case 'diagnose': {
+      /*
+       * 排查用：把"为什么没生效"需要的全部事实一次性返回。
+       * 用户在自检页/弹窗点"复制诊断信息"时能拿到可读的原因。
+       */
+      const read = await readStateChecked();
+      const registered = await isScriptRegistered();
+      const scripts = await (async () => {
+        try {
+          return await chrome.scripting.getRegisteredContentScripts();
+        } catch (err) {
+          return [];
+        }
+      })();
+
+      return {
+        ok: true,
+        state: read.state,
+        readOk: read.ok,
+        registered,
+        allScripts: scripts.map((s) => ({
+          id: s.id,
+          matches: s.matches,
+          files: s.files,
+          world: s.world,
+          runAt: s.runAt,
+        })),
+        lastRegistration: {
+          ok: lastRegistration.ok,
+          error: lastRegistration.error,
+          at: lastRegistration.at,
+          files: lastRegistration.files,
+          matches: lastRegistration.matches,
+        },
+        manifest: {
+          version: chrome.runtime.getManifest().version,
+          minimumChrome: chrome.runtime.getManifest().minimum_chrome_version,
+        },
+        realZone: getRealZone(),
+      };
     }
     case 'getZones':
       /*
@@ -410,6 +491,14 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.runtime.onStartup.addListener(() => {
   init();
 });
+
+/*
+ * Service worker 每次被唤醒都会执行到这里。
+ * MV3 下 onInstalled / onStartup 并不覆盖所有唤醒场景（点扩展页"重新加载"、
+ * SW 因消息唤醒等），所以这里主动跑一次注册，保证任何路径下内容脚本都在。
+ * init() 内部是幂等的（先注销再注册），重复调用安全。
+ */
+init();
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== 'local' || !changes || !changes.settings) return;
