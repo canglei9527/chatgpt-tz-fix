@@ -326,7 +326,41 @@ async function checkTab(message) {
   } catch (err) {
     const detail = String((err && err.message) || err);
     console.warn('[tz-fix] 检测标签页失败：' + detail);
-    return { ok: false, error: '无法在该页面执行检测（可能被浏览器限制或页面尚未加载完成），请刷新页面后重试' };
+
+    /*
+     * 把常见的几类失败翻译成人能看懂的话。
+     * 尤其是 "showing error page"——它表示该标签页当前是一个错误页
+     * （网络中断、被拦截、加载失败），根本不是扩展的问题，
+     * 用户看到"无法检测"会以为是扩展坏了。
+     */
+    if (/showing error page/i.test(detail)) {
+      return {
+        ok: false,
+        error: '这个标签页当前是错误页（加载失败/网络中断/被拦截），不是扩展的问题。请在该标签页重新加载页面，或直接打开一个新的 ChatGPT 页面再检测。',
+        reason: 'error-page',
+      };
+    }
+    if (/no tab with id|cannot access|Cannot access contents/i.test(detail)) {
+      return {
+        ok: false,
+        error: '无法访问该标签页（可能已被关闭，或是浏览器内置页）。请刷新标签页列表后重试。',
+        reason: 'no-access',
+      };
+    }
+    if (/Cannot access a chrome/i.test(detail)) {
+      return {
+        ok: false,
+        error: '浏览器内置页面无法检测，请切换到普通网页（如 chatgpt.com）再试。',
+        reason: 'restricted-url',
+      };
+    }
+
+    return {
+      ok: false,
+      error: '无法在该页面执行检测：' + detail + '。可尝试刷新页面后重试。',
+      reason: 'unknown',
+      detail,
+    };
   }
 }
 
