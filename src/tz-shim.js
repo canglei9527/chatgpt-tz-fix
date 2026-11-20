@@ -1273,6 +1273,79 @@
     }
   }
 
+  /* ------------------------------------------------- 原生性伪装（反指纹） */
+
+  /*
+   * 指纹检测站点会用 Function.prototype.toString.call(fn) 判断一个函数是不是
+   * 被 JS 包装过——原生的返回 "function getTimezoneOffset() { [native code] }"，
+   * 被包装的会打印出源码。我们改写了 Date 的几十个方法，这里必须把 toString
+   * 的输出也"改回去"，否则一眼就能看出被接管。
+   *
+   * 注意：只伪造"我们替换的那批"，不要覆盖全局行为，
+   * 否则页面自己的函数 toString 也会失真，反而更可疑。
+   */
+  var nativelyFaked = new WeakMap();
+  var realFnToString = Function.prototype.toString;
+
+  /** 登记一个"应当看起来是原生"的函数 */
+  function markNative(fn, name) {
+    if (typeof fn !== 'function') return fn;
+    try {
+      nativelyFaked.set(fn, 'function ' + name + '() { [native code] }');
+    } catch (err) { /* 忽略 */ }
+    return fn;
+  }
+
+  /** 伪装后的 Function.prototype.toString */
+  function shamToString() {
+    if (nativelyFaked.has(this)) return nativelyFaked.get(this);
+    return realFnToString.call(this);
+  }
+  markNative(shamToString, 'toString');
+
+  try {
+    Object.defineProperty(Function.prototype, 'toString', {
+      value: shamToString,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
+  } catch (err) {
+    console.warn('[DSH TZ Fix] 伪装 Function.prototype.toString 失败：' + (err && err.message));
+  }
+
+  /* ------------------------------------------- 登记被替换的函数为"原生" */
+
+  /*
+   * 这一步必须放在最后：前面所有 override 都做完了，
+   * 现在统一给它们贴上 "看起来是原生" 的标签。
+   *
+   * 覆盖范围 = 所有 Date.prototype 上的读方法、写方法、字符串方法、
+   * Intl.DateTimeFormat、以及 Date 构造函数本身。
+   * 漏掉任何一个，检测脚本都能点出来。
+   */
+  Object.keys(readMethods).forEach(function (name) {
+    try {
+      markNative(dateProto[name], name);
+    } catch (err) { /* 忽略 */ }
+  });
+  Object.keys(writeMethods).forEach(function (name) {
+    try {
+      markNative(dateProto[name], name);
+    } catch (err) { /* 忽略 */ }
+  });
+  ['toString', 'toDateString', 'toTimeString',
+   'toLocaleString', 'toLocaleDateString', 'toLocaleTimeString'].forEach(function (name) {
+    try {
+      markNative(dateProto[name], name);
+    } catch (err) { /* 忽略 */ }
+  });
+  markNative(TzDate, 'Date');
+  markNative(TzDate.parse, 'parse');
+  markNative(TzDate.now, 'now');
+  markNative(TzDate.UTC, 'UTC');
+  markNative(ShimDateTimeFormat, 'DateTimeFormat');
+
   /* --------------------------------------------------------------- 安装 */
 
   globalThis.Date = TzDate;
