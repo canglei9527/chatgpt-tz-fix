@@ -70,10 +70,30 @@ function createChromeMock(initialSettings) {
       onChanged: { addListener(fn) { listeners.storage.push(fn); } }
     },
     scripting: {
-      registerContentScripts(list, cb) {
+      async registerContentScripts(list, cb) {
+        /*
+         * 严格校验：真实 Chrome 会拒绝未定义的属性。
+         * 早期 mock 无脑接受任何对象，导致 files/js 写错也测试通过（假绿）。
+         * 这里按 RegisteredContentScript 的合法字段白名单校验。
+         */
+        const ALLOWED = new Set(['id', 'matches', 'js', 'css', 'runAt', 'world', 'allFrames', 'matchOriginAsFallback', 'persistAcrossSessions', 'excludeMatches', 'excludeGlobs', 'includeGlobs']);
+        for (const script of list) {
+          for (const key of Object.keys(script)) {
+            if (!ALLOWED.has(key)) {
+              throw new Error("Error at parameter 'scripts': Error at index 0: Unexpected property: '" + key + "'.");
+            }
+          }
+          if (!Array.isArray(script.js)) {
+            throw new Error("Error at parameter 'scripts': Error at index 0: Property 'js' is required.");
+          }
+          for (const f of script.js) {
+            if (!fs.existsSync(path.join(EXT, f))) {
+              throw new Error("Error at parameter 'scripts': Error at index 0: Could not load javascript '" + f + "'");
+            }
+          }
+        }
         calls.register.push(list);
-        if (cb) { cb(); return; }
-        return Promise.resolve();
+        if (cb) { cb(); }
       },
       unregisterContentScripts(opts, cb) {
         calls.unregister.push(opts);
@@ -150,6 +170,14 @@ async function testBackground() {
   assert('默认状态正确', state.enabled === true && state.zone === 'America/Los_Angeles' && state.scope === 'chatgpt',
     JSON.stringify(state));
 
+  /*
+   * background.js 在模块加载时会主动调用 init() 自注册（SW 唤醒自愈）。
+   * 这里要等它跑完并把记录清空，否则后面的断言会读到那一次调用。
+   */
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  mock.calls.register.length = 0;
+  mock.calls.unregister.length = 0;
+
   await bg.ensureRegistered(state);
   const reg = mock.calls.register[0] && mock.calls.register[0][0];
   assert('注册了内容脚本', !!reg);
@@ -159,9 +187,15 @@ async function testBackground() {
     assert('runAt 为 document_start', reg.runAt === 'document_start', reg.runAt);
     assert('allFrames 开启', reg.allFrames === true, String(reg.allFrames));
     assert('persistAcrossSessions 开启', reg.persistAcrossSessions === true, String(reg.persistAcrossSessions));
+    /*
+     * 属性名必须是 js（不是 files）。早期这里跟着 mock 一起写成了 files，
+     * 导致测试"假绿"——真实 Chrome 会直接拒绝这个参数。
+     */
+    assert('注入脚本用 js 属性（不是 files）',
+      reg.files === undefined, '注册对象里不应出现 files 属性，Chrome 会拒绝：' + JSON.stringify(reg.files));
     assert('文件顺序：zone 文件在伪装脚本之前',
-      Array.isArray(reg.files) && reg.files[0] === 'inject/zones/america_los_angeles.js' && reg.files[1] === 'inject/tz-shim.js',
-      JSON.stringify(reg.files));
+      Array.isArray(reg.js) && reg.js[0] === 'inject/zones/america_los_angeles.js' && reg.js[1] === 'inject/tz-shim.js',
+      JSON.stringify(reg.js));
     assert('ChatGPT 范围的 matches 正确',
       Array.isArray(reg.matches) && reg.matches.indexOf('https://chatgpt.com/*') >= 0 && reg.matches.indexOf('https://*.openai.com/*') >= 0,
       JSON.stringify(reg.matches));
@@ -176,7 +210,7 @@ async function testBackground() {
   await bg.ensureRegistered({ enabled: true, zone: 'Asia/Tokyo', scope: 'all', v: 1 });
   const regAll = mock.calls.register[mock.calls.register.length - 1][0];
   assert('所有网站范围使用 <all_urls>', regAll.matches.length === 1 && regAll.matches[0] === '<all_urls>', JSON.stringify(regAll.matches));
-  assert('切换时区后注入文件同步变化', regAll.files[0] === 'inject/zones/asia_tokyo.js', JSON.stringify(regAll.files));
+  assert('切换时区后注入文件同步变化', regAll.js[0] === 'inject/zones/asia_tokyo.js', JSON.stringify(regAll.js));
 
   // 校验
   assert('拒绝非法时区', !!bg.validatePatch({ zone: 'Not/AZone' }));
@@ -367,5 +401,7 @@ async function main() {
 
 main().catch((e) => {
   process.stdout.write('✗ 测试异常：' + (e && e.stack || e) + String.fromCharCode(10));
+  process.stdout.write('--- 已完成断言 ---' + String.fromCharCode(10));
+  notes.forEach((n) => process.stdout.write(n + String.fromCharCode(10)));
   process.exitCode = 1;
 });

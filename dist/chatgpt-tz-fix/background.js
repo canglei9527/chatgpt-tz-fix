@@ -199,7 +199,14 @@ async function applyRegistration(stateInput) {
       {
         id: SCRIPT_ID,
         matches,
-        files,
+        /*
+         * 注意：这里的属性名必须是 js，不是 files。
+         * chrome.scripting.registerContentScripts 的 RegisteredContentScript
+         * 定义是 js: string[]；写成 files 会被 Chrome 直接拒绝：
+         *   "Error at parameter 'scripts': Error at index 0: Unexpected property: 'files'."
+         * manifest.json 的静态 content_scripts 用的是 js，两者容易混淆。
+         */
+        js: files,
         runAt: 'document_start',
         world: 'MAIN',
         allFrames: true,
