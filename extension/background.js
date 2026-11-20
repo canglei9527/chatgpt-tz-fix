@@ -15,7 +15,9 @@ const DEFAULT_STATE = Object.freeze({
   zone: 'America/Los_Angeles',
   scope: 'chatgpt',
   // WebRTC 本机 IP 防泄露：默认关闭，避免影响视频通话类站点；用户可在弹窗里打开
-  webrtc: false
+  webrtc: false,
+  // 中文字体指纹模糊：默认关闭，只在需要过指纹检测时打开
+  font: false
 });
 /** 允许的生效范围 */
 const SCOPES = Object.freeze(['chatgpt', 'all']);
@@ -57,7 +59,8 @@ function normalizeState(input) {
   const scope = SCOPES.includes(source.scope) ? source.scope : DEFAULT_STATE.scope;
   const enabled = typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_STATE.enabled;
   const webrtc = typeof source.webrtc === 'boolean' ? source.webrtc : DEFAULT_STATE.webrtc;
-  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc };
+  const font = typeof source.font === 'boolean' ? source.font : DEFAULT_STATE.font;
+  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc, font };
 }
 
 /** 单条校验：返回错误文案，通过返回 null */
@@ -66,6 +69,7 @@ function validatePatch(patch) {
   if ('enabled' in patch && typeof patch.enabled !== 'boolean') return 'enabled 必须是布尔值';
   if ('scope' in patch && !SCOPES.includes(patch.scope)) return '不支持的生效范围：' + String(patch.scope);
   if ('webrtc' in patch && typeof patch.webrtc !== 'boolean') return 'webrtc 必须是布尔值';
+  if ('font' in patch && typeof patch.font !== 'boolean') return 'font 必须是布尔值';
   if ('zone' in patch && !findZone(patch.zone)) return '未知时区：' + String(patch.zone);
   return null;
 }
@@ -135,11 +139,13 @@ function resolveMatches(scope) {
  *   2. webrtc-guard.js  —— 可选，屏蔽会泄露真实 IP 的 ICE 候选
  *   3. tz-shim.js       —— 最后装时区伪装
  */
-function resolveFiles(zone, webrtc) {
+function resolveFiles(zone, webrtc, font) {
   const entry = findZone(zone);
   const slug = entry ? entry.slug : 'america_los_angeles';
   const files = [INJECT_FILES[0].replace('ZONE_SLUG', slug)];
+  // 顺序：webrtc → font → tz-shim（shim 最后，它的反指纹要覆盖前面两个的改动）
   if (webrtc) files.push('inject/webrtc-guard.js');
+  if (font) files.push('inject/font-guard.js');
   files.push(INJECT_FILES[1]);
   return files;
 }
@@ -210,7 +216,7 @@ async function applyRegistration(stateInput) {
   }
 
   const matches = resolveMatches(state.scope);
-  const files = resolveFiles(state.zone, state.webrtc);
+  const files = resolveFiles(state.zone, state.webrtc, state.font);
   lastRegistration.files = files;
   lastRegistration.matches = matches;
 

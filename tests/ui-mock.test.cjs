@@ -229,6 +229,22 @@ async function testBackground() {
     regWrtc.js[1] === 'inject/webrtc-guard.js' && regWrtc.js[2] === 'inject/tz-shim.js',
     JSON.stringify(regWrtc.js));
 
+  /* 字体防护同样是可选项，且必须排在 tz-shim 之前 */
+  await bg.ensureRegistered({ enabled: true, zone: 'America/Los_Angeles', scope: 'chatgpt', webrtc: false, font: true, v: 1 });
+  const regFont = mock.calls.register[mock.calls.register.length - 1][0];
+  assert('开启字体防护后注入 3 个文件',
+    regFont.js.length === 3 && regFont.js.indexOf('inject/font-guard.js') === 1,
+    JSON.stringify(regFont.js));
+
+  await bg.ensureRegistered({ enabled: true, zone: 'America/Los_Angeles', scope: 'chatgpt', webrtc: true, font: true, v: 1 });
+  const regBoth = mock.calls.register[mock.calls.register.length - 1][0];
+  assert('WebRTC + 字体同时开启时注入顺序正确',
+    regBoth.js.length === 4 &&
+    regBoth.js[1] === 'inject/webrtc-guard.js' &&
+    regBoth.js[2] === 'inject/font-guard.js' &&
+    regBoth.js[3] === 'inject/tz-shim.js',
+    JSON.stringify(regBoth.js));
+
   // 校验
   assert('拒绝非法时区', !!bg.validatePatch({ zone: 'Not/AZone' }));
   assert('拒绝非法范围', !!bg.validatePatch({ scope: 'nope' }));

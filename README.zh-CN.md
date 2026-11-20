@@ -295,6 +295,34 @@ WebRTC 建立连接前会收集「候选地址」，其中两类携带你的真�
 
 ---
 
+## 六点八、隐藏中文字体特征（可选）
+
+检测站点会枚举系统字体判断你在哪个地区：
+
+```js
+document.fonts.check('12px SimHei')   // 装了黑体 → 中国环境
+```
+
+或对比 Canvas 测宽：
+
+```js
+ctx.font = '12px monospace, SimHei';  const w1 = ctx.measureText('mmmmmmmmmmlli').width;
+ctx.font = '12px monospace';          const w2 = ctx.measureText('mmmmmmmmmmlli').width;
+// w1 !== w2 → SimHei 存在
+```
+
+弹窗「隐私加固」里新增「**隐藏中文字体特征**」开关（默认关闭）。打开后：
+
+- `document.fonts.check()` 查询中文字体返回 `false`
+- `Canvas measureText()` 从字体串里剔除中文字体名再测量（测完立即还原 `font` 属性）
+- 覆盖 `CanvasRenderingContext2D` 和 `OffscreenCanvasRenderingContext2D`
+
+覆盖字体：SimHei/SimSun/KaiTi/FangSong/微软雅黑/等线/华文系列/方正系列 + 中日韩常见字体，共 30+ 个。
+
+**不影响正常渲染**——只改 JS 主动探测的结果，页面的 CSS 字体回退链照常工作。
+
+---
+
 ## 七、常见问题
 
 **Q：安装后没效果？**

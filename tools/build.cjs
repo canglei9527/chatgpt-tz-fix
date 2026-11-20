@@ -62,6 +62,11 @@ function copyShim() {
     path.join(EXT, 'inject', 'webrtc-guard.js'),
     'WebRTC 防护脚本'
   );
+  stageInjectScript(
+    path.join(ROOT, 'src', 'font-guard.js'),
+    path.join(EXT, 'inject', 'font-guard.js'),
+    '字体指纹防护脚本'
+  );
 }
 
 /* ---------- 2. 校验扩展结构 ---------- */

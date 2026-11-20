@@ -34,6 +34,7 @@
     savedHint: null,
     scopeSegment: null,
     webrtcToggle: null,
+    fontToggle: null,
     ipRow: null,
     ipValue: null,
     ipHint: null,
@@ -135,6 +136,9 @@
 
     if (ui.webrtcToggle) {
       ui.webrtcToggle.checked = !!s.webrtc;
+    }
+    if (ui.fontToggle) {
+      ui.fontToggle.checked = !!s.font;
     }
 
     var scopeButtons = ui.scopeSegment.querySelectorAll('[data-scope]');
@@ -712,6 +716,16 @@
     });
   }
 
+  function bindFont() {
+    if (!ui.fontToggle) return;
+    ui.fontToggle.addEventListener('change', function () {
+      var on = ui.fontToggle.checked;
+      handlePatch({ font: on }, {
+        message: on ? '已隐藏中文字体特征，刷新页面后生效' : '已恢复字体探测，刷新页面后生效'
+      });
+    });
+  }
+
   function activeTab() {
     return new Promise(function (resolve) {
       try {
@@ -836,6 +850,7 @@
     ui.savedHint = document.getElementById('savedHint');
     ui.scopeSegment = document.getElementById('scopeSegment');
     ui.webrtcToggle = document.getElementById('webrtcToggle');
+    ui.fontToggle = document.getElementById('fontToggle');
     ui.ipRow = document.getElementById('ipRow');
     ui.ipValue = document.getElementById('ipValue');
     ui.ipHint = document.getElementById('ipHint');
@@ -855,6 +870,7 @@
     bindZoneSelect();
     bindScope();
     bindWebrtc();
+    bindFont();
     bindIpDetect();
     bindActions();
 
