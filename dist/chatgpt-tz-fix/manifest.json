@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "时区修复 · ChatGPT",
+  "short_name": "时区修复",
+  "version": "1.0.0",
+  "description": "把浏览器 JS 时区伪装成指定时区，修复 ChatGPT 网页端降智问题。",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "时区修复",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "verify/verify.html",
+        "verify/verify.css",
+        "verify/verify.js",
+        "verify/verify-bootstrap.html",
+        "verify/verify-bootstrap.js",
+        "verify/verify-fingerprint.js",
+        "inject/tz-shim.js",
+        "inject/zones/*.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>时区修复</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="head">
+    <div class="brand">
+      <img class="brand-icon" src="../icons/icon32.png" alt="" width="26" height="26">
+      <div class="brand-text">
+        <h1>时区修复</h1>
+        <p class="brand-sub">ChatGPT 网页端 · 时区伪装</p>
+      </div>
+    </div>
+    <label class="switch" title="开启 / 关闭">
+      <input id="toggle" type="checkbox" role="switch" aria-label="开启时区伪装">
+      <span class="switch-track"><span class="switch-thumb"></span></span>
+    </label>
+  </header>
+
+  <section class="card status-card" id="statusCard">
+    <div class="status-line">
+      <span class="dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">读取中…</span>
+    </div>
+    <div class="compare">
+      <div class="compare-row">
+        <span class="compare-key">真实时区</span>
+        <span class="compare-val" id="realZone">—</span>
+      </div>
+      <div class="compare-row">
+        <span class="compare-key">伪装时区</span>
+        <span class="compare-val accent" id="maskZone">—</span>
+      </div>
+      <div class="compare-row clock-row">
+        <span class="compare-key">本机时钟</span>
+        <span class="clocks">
+          <span id="clockReal">--:--:--</span>
+          <span class="clock-sep">→</span>
+          <span id="clockMasked" class="accent">--:--:--</span>
+          <span class="clock-day" id="clockDay"></span>
+        </span>
+      </div>
+    </div>
+    <div class="check-result" id="checkResult" hidden></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>伪装时区</h2>
+      <span class="saved-hint" id="savedHint"></span>
+    </div>
+    <div class="search-wrap">
+      <input id="zoneSearch" class="search" type="search" placeholder="搜索时区，例如 洛杉矶 / tokyo" autocomplete="off" spellcheck="false">
+    </div>
+    <select id="zoneSelect" class="select" size="1"></select>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <h2>生效范围</h2>
+    </div>
+    <div class="segment" id="scopeSegment" role="radiogroup" aria-label="生效范围">
+      <button class="segment-item" type="button" data-scope="chatgpt" role="radio">
+        <span class="segment-title">仅 ChatGPT 站点</span>
+        <span class="segment-sub">推荐</span>
+      </button>
+      <button class="segment-item" type="button" data-scope="all" role="radio">
+        <span class="segment-title">所有网站</span>
+        <span class="segment-sub">全局伪装</span>
+      </button>
+    </div>
+  </section>
+
+  <section class="actions">
+    <button id="btnCheck" class="btn primary" type="button">立即检测当前标签页</button>
+    <div class="actions-row">
+      <button id="btnReload" class="btn ghost" type="button">刷新页面</button>
+      <button id="btnOpen" class="btn ghost" type="button">打开 ChatGPT</button>
+      <button id="btnVerify" class="btn ghost" type="button">自检</button>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <button id="btnCopy" class="link" type="button">复制诊断信息</button>
+    <span class="dot-sep">·</span>
+    <span id="version">v—</span>
+  </footer>
+  <p class="tip">修改后在 ChatGPT 页面按 F5 刷新即可生效</p>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="popup.js"></script>
+</body>
+</html>

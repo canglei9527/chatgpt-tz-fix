@@ -1,0 +1,17 @@
+# 测试中间产物
+tests/.tmp/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.log
+
+# node
+node_modules/
+
+# python
+__pycache__/
+*.pyc
+
+# 内部审查存档（不随仓库发布）
+REVIEW.md

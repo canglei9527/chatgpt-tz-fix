@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>时区修复 · 自检</title>
+<link rel="stylesheet" href="verify.css">
+</head>
+<body>
+<main class="wrap">
+
+  <header class="hero">
+    <div class="hero-id">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="40" height="40">
+          <defs>
+            <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#22c55e"></stop>
+              <stop offset="1" stop-color="#0ea5e9"></stop>
+            </linearGradient>
+          </defs>
+          <rect x="1" y="1" width="46" height="46" rx="13" fill="url(#lg)"></rect>
+          <circle cx="24" cy="24" r="13" fill="none" stroke="#fff" stroke-width="2" opacity=".95"></circle>
+          <ellipse cx="24" cy="24" rx="6" ry="13" fill="none" stroke="#fff" stroke-width="1.6" opacity=".85"></ellipse>
+          <path d="M11 24h26M13.5 17h21M13.5 31h21" stroke="#fff" stroke-width="1.4" opacity=".7" fill="none"></path>
+        </svg>
+      </span>
+      <div class="hero-text">
+        <h1>时区修复 · 自检</h1>
+        <p class="sub">在真实浏览器里验证「时区伪装」是否按预期生效</p>
+      </div>
+    </div>
+    <button id="btnRun" class="btn primary" type="button">重新检测</button>
+  </header>
+
+  <section class="card" id="cardEnv">
+    <div class="card-head">
+      <h2>运行环境</h2>
+      <span class="tag" id="envStatusTag">读取中…</span>
+    </div>
+    <dl class="kv" id="envList"></dl>
+  </section>
+
+  <section class="card" id="cardEngine">
+    <div class="card-head">
+      <h2>注入引擎自检</h2>
+      <span class="tag" id="engineStatusTag">检测中…</span>
+    </div>
+    <p class="card-desc">在独立的页面环境（沙箱 iframe）中真实执行 <code>inject/zones/&lt;时区&gt;.js</code> 与 <code>inject/tz-shim.js</code>，逐项对照浏览器原生 ICU 的参考值。</p>
+    <ul class="checks" id="engineChecks"></ul>
+    <p class="hint" id="engineHint"></p>
+  </section>
+
+  <section class="card" id="cardTab">
+    <div class="card-head">
+      <h2>标签页实测</h2>
+      <span class="tag" id="tabStatusTag">未检测</span>
+    </div>
+    <p class="card-desc">对已打开的真实网页执行一次注入探针，确认内容脚本已在页面主世界生效（ChatGPT 页面用这一项验收）。</p>
+    <div class="row">
+      <label class="field">
+        <span class="field-label">目标标签页</span>
+        <select id="tabSelect"></select>
+      </label>
+      <div class="row-actions">
+        <button id="btnCheckTab" class="btn" type="button">检测</button>
+        <button id="btnReloadTab" class="btn ghost" type="button">刷新</button>
+        <button id="btnOpenChatGPT" class="btn ghost" type="button">打开 ChatGPT</button>
+      </div>
+    </div>
+    <ul class="checks" id="tabChecks"></ul>
+  </section>
+
+  <section class="card" id="cardReport">
+    <div class="card-head">
+      <h2>诊断报告</h2>
+      <div class="card-actions">
+        <button id="btnCopy" class="btn ghost sm" type="button">复制</button>
+        <button id="btnDownload" class="btn ghost sm" type="button">下载 JSON</button>
+      </div>
+    </div>
+    <pre id="report" class="report">尚未生成</pre>
+  </section>
+
+  <footer class="foot">
+    <span id="footVersion">—</span>
+    <span class="dot">·</span>
+    <span>检测不会修改任何设置</span>
+  </footer>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="../shared/zones.js"></script>
+<script src="verify.js"></script>
+</body>
+</html>

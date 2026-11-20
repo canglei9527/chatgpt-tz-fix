@@ -1,0 +1,45 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Differential & integration tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Show environment
+        run: |
+          node --version
+          node -e "console.log('Intl zones:', Intl.supportedValuesOf('timeZone').length); console.log('resolved TZ:', Intl.DateTimeFormat().resolvedOptions().timeZone)"
+
+      - name: Build extension
+        run: node tools/build.cjs
+
+      - name: Run all tests
+        run: node tests/run-all.cjs
+        env:
+          CI: "true"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-tz-fix-${{ matrix.os }}-node${{ matrix.node }}
+          path: dist/chatgpt-tz-fix/
+          retention-days: 14
