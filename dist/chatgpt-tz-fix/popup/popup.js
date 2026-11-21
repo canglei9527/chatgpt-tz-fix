@@ -389,6 +389,26 @@
     state.saveTimer = setTimeout(flushPatch, delay);
   }
 
+  /*
+   * 保存期间的兜底定时器。
+   *
+   * 之前有个致命 bug：saving 置 true 后，如果 saveState 返回的 Promise
+   * 永远不 settle（后台 SW 被回收、消息通道断开等），saving 就永远卡在 true，
+   * 此后所有用户操作都被 if (saving) return 挡掉 —— 表现就是「点开关没反应」。
+   *
+   * 现在加一个超时：15 秒后强制解除 saving 状态并提示。
+   */
+  var saveGuardTimer = null;
+  var SAVE_TIMEOUT_MS = 15000;
+
+  function releaseSaving() {
+    saving = false;
+    if (saveGuardTimer) {
+      clearTimeout(saveGuardTimer);
+      saveGuardTimer = null;
+    }
+  }
+
   function flushPatch() {
     if (saving || !pendingPatch) return;
 
@@ -400,8 +420,17 @@
     pendingRerender = false;
     saving = true;
 
+    // 超时兜底：防止 Promise 不 settle 导致后续操作全部失灵
+    if (saveGuardTimer) clearTimeout(saveGuardTimer);
+    saveGuardTimer = setTimeout(function () {
+      if (!saving) return;
+      releaseSaving();
+      toast('保存超时，请重试（后台可能已休眠）');
+      if (pendingPatch) flushPatch();
+    }, SAVE_TIMEOUT_MS);
+
     saveState(patch).then(function (res) {
-      saving = false;
+      releaseSaving();
       if (!applyStateResponse(res)) {
         toast((res && res.error) || '保存失败');
         return;
@@ -415,8 +444,9 @@
       // 期间如果又攒了新 patch，继续发
       if (pendingPatch) flushPatch();
     }).catch(function (err) {
-      saving = false;
+      releaseSaving();
       toast('保存失败：' + ((err && err.message) || err));
+      if (pendingPatch) flushPatch();
     });
   }
 

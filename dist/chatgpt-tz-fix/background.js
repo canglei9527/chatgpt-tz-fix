@@ -337,28 +337,56 @@ function buildPacScript(port) {
   ].join('\n');
 }
 
-/** 应用/撤销浏览器代理设置 */
+/** 给一个 Promise 加超时，超时后返回 fallback（不抛错） */
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([
+    promise.catch(function () { return fallback; }),
+    new Promise(function (resolve) { setTimeout(function () { resolve(fallback); }, ms); })
+  ]);
+}
+
+/**
+ * 应用/撤销浏览器代理设置。
+ *
+ * 重要：这个函数绝不能让调用方卡住。
+ * chrome.proxy.settings 在某些情况下可能长时间不 resolve（浏览器策略限制、
+ * 或者扩展刚被重载时 API 尚未就绪），一旦 await 卡死，setState 就永远返回不了，
+ * 弹窗那边 saving 标志永远为 true，之后所有开关都点不动。
+ * 所以这里统一加 3 秒超时。
+ */
 async function applyBrowserProxy(state) {
   if (!chrome.proxy || !chrome.proxy.settings) {
     console.warn('[tz-fix] 当前浏览器不支持 chrome.proxy，跳过');
     return false;
   }
 
+  var timeoutMs = 3000;
+
   try {
     if (!state.browserProxy) {
       // 清空扩展设置的代理，让浏览器回到系统代理
-      await chrome.proxy.settings.clear({ scope: 'regular' });
-      return true;
+      var cleared = await withTimeout(
+        chrome.proxy.settings.clear({ scope: 'regular' }),
+        timeoutMs,
+        'timeout'
+      );
+      if (cleared === 'timeout') console.warn('[tz-fix] 清除代理设置超时');
+      return cleared !== 'timeout';
     }
 
-    await chrome.proxy.settings.set({
-      value: {
-        mode: 'pac_script',
-        pacScript: { data: buildPacScript(state.proxyPort) }
-      },
-      scope: 'regular'
-    });
-    return true;
+    var set = await withTimeout(
+      chrome.proxy.settings.set({
+        value: {
+          mode: 'pac_script',
+          pacScript: { data: buildPacScript(state.proxyPort) }
+        },
+        scope: 'regular'
+      }),
+      timeoutMs,
+      'timeout'
+    );
+    if (set === 'timeout') console.warn('[tz-fix] 设置代理超时');
+    return set !== 'timeout';
   } catch (err) {
     console.warn('[tz-fix] 设置浏览器代理失败：' + (err && err.message));
     return false;
