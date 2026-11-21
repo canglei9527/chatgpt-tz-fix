@@ -1,0 +1,17 @@
+# Profile Enhancement Merge Template for Clash Verge
+#
+# 给 Clash 增加一个「浏览器专用端口」7891：
+#   从该端口进来的流量无视 rules，直接走「一元机场」策略组。
+#   Chrome 扩展用 PAC 把 ChatGPT 域名指向它，实现「浏览器级全局」，
+#   系统其它程序仍按规则分流。
+
+profile:
+  store-selected: true
+
+listeners:
+  - name: browser-global
+    type: mixed
+    port: 7891
+    listen: 127.0.0.1
+    proxy: 一元机场
+    udp: true

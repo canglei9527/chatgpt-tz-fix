@@ -35,6 +35,9 @@
     scopeSegment: null,
     webrtcToggle: null,
     fontToggle: null,
+    proxyToggle: null,
+    proxyPort: null,
+    proxyHint: null,
     ipRow: null,
     ipValue: null,
     ipHint: null,
@@ -139,6 +142,13 @@
     }
     if (ui.fontToggle) {
       ui.fontToggle.checked = !!s.font;
+    }
+    if (ui.proxyToggle) {
+      ui.proxyToggle.checked = !!s.browserProxy;
+    }
+    if (ui.proxyPort) {
+      ui.proxyPort.value = String(s.proxyPort || 7891);
+      updateProxyHint(!!s.browserProxy);
     }
 
     var scopeButtons = ui.scopeSegment.querySelectorAll('[data-scope]');
@@ -716,6 +726,44 @@
     });
   }
 
+  function bindBrowserProxy() {
+    if (ui.proxyToggle) {
+      ui.proxyToggle.addEventListener('change', function () {
+        var on = ui.proxyToggle.checked;
+        handlePatch({ browserProxy: on }, {
+          message: on ? 'ChatGPT 将强制走代理，其它网站不受影响' : '已恢复按系统代理规则分流'
+        });
+        updateProxyHint(on);
+      });
+    }
+
+    if (ui.proxyPort) {
+      var portTimer = null;
+      ui.proxyPort.addEventListener('input', function () {
+        clearTimeout(portTimer);
+        portTimer = setTimeout(function () {
+          var v = parseInt(ui.proxyPort.value, 10);
+          if (!v || v < 1 || v > 65535) {
+            toast('端口必须是 1-65535');
+            return;
+          }
+          handlePatch({ proxyPort: v }, { message: '专用端口已更新为 ' + v });
+        }, 500);
+      });
+    }
+  }
+
+  function updateProxyHint(on) {
+    if (!ui.proxyHint) return;
+    if (on) {
+      ui.proxyHint.className = 'ip-hint warn';
+      ui.proxyHint.textContent = '已开启。请确认 Clash 的 Merge 配置里有对应端口的 listeners，否则 ChatGPT 会连不上。';
+    } else {
+      ui.proxyHint.className = 'ip-hint';
+      ui.proxyHint.textContent = '需要在 Clash 的 Merge 配置里添加同名 listeners 端口（见说明文档）';
+    }
+  }
+
   function bindFont() {
     if (!ui.fontToggle) return;
     ui.fontToggle.addEventListener('change', function () {
@@ -851,6 +899,9 @@
     ui.scopeSegment = document.getElementById('scopeSegment');
     ui.webrtcToggle = document.getElementById('webrtcToggle');
     ui.fontToggle = document.getElementById('fontToggle');
+    ui.proxyToggle = document.getElementById('proxyToggle');
+    ui.proxyPort = document.getElementById('proxyPort');
+    ui.proxyHint = document.getElementById('proxyHint');
     ui.ipRow = document.getElementById('ipRow');
     ui.ipValue = document.getElementById('ipValue');
     ui.ipHint = document.getElementById('ipHint');
@@ -871,6 +922,7 @@
     bindScope();
     bindWebrtc();
     bindFont();
+    bindBrowserProxy();
     bindIpDetect();
     bindActions();
 

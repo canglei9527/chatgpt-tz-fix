@@ -333,6 +333,7 @@ function testManifest() {
   const perms = manifest.permissions || [];
   assert('permissions 含 storage', perms.indexOf('storage') >= 0);
   assert('permissions 含 scripting', perms.indexOf('scripting') >= 0);
+  assert('permissions 含 proxy（浏览器强制代理需要）', perms.indexOf('proxy') >= 0);
   assert('host_permissions 含 <all_urls>', (manifest.host_permissions || []).indexOf('<all_urls>') >= 0);
 
   const war = manifest.web_accessible_resources || [];

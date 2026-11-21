@@ -115,6 +115,27 @@
     </label>
   </section>
 
+  <section class="card">
+    <div class="section-head">
+      <h2>浏览器强制代理</h2>
+    </div>
+    <label class="toggle-row" for="proxyToggle">
+      <span class="toggle-text">
+        <span class="toggle-title">ChatGPT 流量绕过规则分流</span>
+        <span class="toggle-sub">只让浏览器里 ChatGPT 相关域名强制走代理，其它网站不受影响</span>
+      </span>
+      <span class="switch small">
+        <input id="proxyToggle" type="checkbox" role="switch" aria-label="浏览器强制代理">
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+      </span>
+    </label>
+    <div class="port-row">
+      <label class="field-label" for="proxyPort">Clash 专用端口</label>
+      <input id="proxyPort" class="port-input" type="number" min="1" max="65535" placeholder="7891">
+    </div>
+    <p class="ip-hint" id="proxyHint">需要在 Clash 的 Merge 配置里添加同名 listeners 端口（见说明文档）</p>
+  </section>
+
   <section class="actions">
     <button id="btnCheck" class="btn primary" type="button">立即检测当前标签页</button>
     <div class="actions-row">

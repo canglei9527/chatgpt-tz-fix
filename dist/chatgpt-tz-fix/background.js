@@ -17,7 +17,18 @@ const DEFAULT_STATE = Object.freeze({
   // WebRTC 本机 IP 防泄露：默认关闭，避免影响视频通话类站点；用户可在弹窗里打开
   webrtc: false,
   // 中文字体指纹模糊：默认关闭，只在需要过指纹检测时打开
-  font: false
+  font: false,
+  /*
+   * 浏览器级强制代理。
+   * 开启后通过 chrome.proxy 的 PAC 脚本，把 ChatGPT 相关域名的流量
+   * 指向 Clash 的"专用监听端口"，绕开 Clash 规则模式的分流判断。
+   *
+   * 为什么需要：规则模式下 GEOIP,CN,DIRECT 排在 MATCH 前面，
+   * 只要有一个 ChatGPT 子请求被判成中国 IP 就会直连，暴露真实 IP。
+   */
+  browserProxy: false,
+  // Clash 专用监听端口（对应 Clash 配置里的 listeners）
+  proxyPort: 7891
 });
 /** 允许的生效范围 */
 const SCOPES = Object.freeze(['chatgpt', 'all']);
@@ -60,7 +71,11 @@ function normalizeState(input) {
   const enabled = typeof source.enabled === 'boolean' ? source.enabled : DEFAULT_STATE.enabled;
   const webrtc = typeof source.webrtc === 'boolean' ? source.webrtc : DEFAULT_STATE.webrtc;
   const font = typeof source.font === 'boolean' ? source.font : DEFAULT_STATE.font;
-  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc, font };
+  const browserProxy = typeof source.browserProxy === 'boolean' ? source.browserProxy : DEFAULT_STATE.browserProxy;
+  const proxyPort = (Number.isInteger(source.proxyPort) && source.proxyPort > 0 && source.proxyPort < 65536)
+    ? source.proxyPort
+    : DEFAULT_STATE.proxyPort;
+  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc, font, browserProxy, proxyPort };
 }
 
 /** 单条校验：返回错误文案，通过返回 null */
@@ -70,6 +85,10 @@ function validatePatch(patch) {
   if ('scope' in patch && !SCOPES.includes(patch.scope)) return '不支持的生效范围：' + String(patch.scope);
   if ('webrtc' in patch && typeof patch.webrtc !== 'boolean') return 'webrtc 必须是布尔值';
   if ('font' in patch && typeof patch.font !== 'boolean') return 'font 必须是布尔值';
+  if ('browserProxy' in patch && typeof patch.browserProxy !== 'boolean') return 'browserProxy 必须是布尔值';
+  if ('proxyPort' in patch && (!Number.isInteger(patch.proxyPort) || patch.proxyPort < 1 || patch.proxyPort > 65535)) {
+    return '代理端口必须是 1-65535 的整数';
+  }
   if ('zone' in patch && !findZone(patch.zone)) return '未知时区：' + String(patch.zone);
   return null;
 }
@@ -263,6 +282,89 @@ async function applyRegistration(stateInput) {
   }
 }
 
+/* ==================== 浏览器级强制代理（chrome.proxy） ==================== */
+
+/*
+ * 用途
+ *   Clash 规则模式下，GEOIP,CN,DIRECT 排在 MATCH 前面。只要 ChatGPT 的
+ *   某个子请求（CDN / auth / websocket）解析到被判为中国 IP 的地址，就会走直连，
+ *   服务端因此看到「海外账号 + 中国真实 IP」的矛盾组合，触发降级。
+ *
+ * 做法
+ *   在【浏览器层】用 PAC 脚本，把 ChatGPT 相关域名强制指向 Clash 的专用端口
+ *   （那个端口绑定了固定策略组，无视 rules）。系统其它程序仍按规则分流。
+ *
+ * 为什么用 PAC 而不是 fixed_servers
+ *   fixed_servers 会把【所有】流量都强制走代理，那就等于浏览器全局代理了。
+ *   PAC 可以只对指定域名生效，其它域名返回 DIRECT 交给系统代理设置处理，
+ *   这样规则模式对其它网站依然有效。
+ */
+
+/** ChatGPT 网页端所有会发请求的域名 */
+const PROXY_TARGET_HOSTS = [
+  'chatgpt.com',
+  'openai.com',
+  'oaistatic.com',
+  'oaiusercontent.com',
+  'chat.com',
+  'sora.com',
+  'auth0.com',
+  'featuregates.org',
+  'statsig.com',
+  'hcaptcha.com',
+  'recaptcha.net'
+];
+
+/**
+ * 生成 PAC 脚本。
+ *
+ * 只对 PROXY_TARGET_HOSTS 及其子域返回代理；
+ * 其它一律 DIRECT，让浏览器回落到系统代理设置（即 Clash 的规则模式）。
+ */
+function buildPacScript(port) {
+  const conditions = PROXY_TARGET_HOSTS
+    .map((h) => '    if (shExpMatch(host, "*' + h + '")) return "PROXY 127.0.0.1:' + port + '";')
+    .join('\n');
+
+  return [
+    '// 由「时区修复」扩展生成：ChatGPT 相关域名强制走 Clash 专用端口',
+    'function FindProxyForURL(url, host) {',
+    '  if (isPlainHostName(host) || host === "localhost" || host === "127.0.0.1") return "DIRECT";',
+    conditions,
+    '  // 其它域名交给系统代理（Clash 规则模式）处理',
+    '  return "DIRECT";',
+    '}'
+  ].join('\n');
+}
+
+/** 应用/撤销浏览器代理设置 */
+async function applyBrowserProxy(state) {
+  if (!chrome.proxy || !chrome.proxy.settings) {
+    console.warn('[tz-fix] 当前浏览器不支持 chrome.proxy，跳过');
+    return false;
+  }
+
+  try {
+    if (!state.browserProxy) {
+      // 清空扩展设置的代理，让浏览器回到系统代理
+      await chrome.proxy.settings.clear({ scope: 'regular' });
+      return true;
+    }
+
+    await chrome.proxy.settings.set({
+      value: {
+        mode: 'pac_script',
+        pacScript: { data: buildPacScript(state.proxyPort) }
+      },
+      scope: 'regular'
+    });
+    return true;
+  } catch (err) {
+    console.warn('[tz-fix] 设置浏览器代理失败：' + (err && err.message));
+    return false;
+  }
+}
+
 /** 查询内容脚本是否已注册 */
 async function isScriptRegistered() {
   try {
@@ -423,6 +525,8 @@ async function handleMessage(message, sender) {
           registrationError: registered ? null : (lastRegistration.error || '未注册'),
           files: lastRegistration.files,
           matches: lastRegistration.matches,
+          browserProxyActive: !!(read.state.browserProxy && chrome.proxy),
+          proxyPort: read.state.proxyPort,
         },
       };
     }
@@ -445,6 +549,7 @@ async function handleMessage(message, sender) {
       await writeState(next);
       lastKnownState = next;
       await ensureRegistered(next);
+      await applyBrowserProxy(next);
       return { ok: true, state: next };
     }
     case 'diagnose': {
@@ -541,6 +646,7 @@ async function init() {
   try {
     const state = await readState();
     await ensureRegistered(state);
+    await applyBrowserProxy(state);
     await updateBadge(state.enabled);
   } catch (err) {
     console.warn('[tz-fix] 初始化失败：', err && err.message);
@@ -572,6 +678,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   const next = normalizeState(changes.settings.newValue);
   // applyRegistration 内部已负责更新徽标，这里不再重复调用
   ensureRegistered(next);
+  applyBrowserProxy(next);
 });
 
 // 仅用于单元测试的稳定性入口（浏览器运行时不产生副作用）

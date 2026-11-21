@@ -436,3 +436,28 @@ html, body {
 }
 .ip-hint.warn { color: var(--amber); }
 .ip-hint.bad { color: var(--red); }
+
+/* ---------- 浏览器代理端口 ---------- */
+
+.port-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.port-input {
+  width: 96px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  text-align: right;
+  outline: none;
+}
+.port-input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }

@@ -323,6 +323,94 @@ ctx.font = '12px monospace';          const w2 = ctx.measureText('mmmmmmmmmmlli'
 
 ---
 
+## 六点九、浏览器强制代理（推荐，解决「规则模式降智」）
+
+### 问题
+
+Clash 规则模式下，配置末尾是：
+
+```yaml
+GEOIP,CN,DIRECT      ← 关键在这
+MATCH,一元机场
+```
+
+`GEOIP,CN,DIRECT` 排在 `MATCH` **前面**。ChatGPT 会请求很多子域名：
+
+- `chatgpt.com` / `ab.chatgpt.com`（A/B 测试）
+- `auth.openai.com` / `cdn.oaistatic.com` / WebSocket 端点
+- `featuregates.org` / `statsig.com`（功能开关）
+
+**只要有一个**解析到的 IP 被判成中国 IP，就命中 `GEOIP,CN,DIRECT` → **直连** → 暴露真实国内 IP → 服务端看到「海外账号 + 中国 IP」的位置矛盾 → 降级。
+
+### 解决思路
+
+给 Clash 增加一个**浏览器专用端口**，从该端口进来的流量无视 rules，强制走指定策略组：
+
+```
+系统默认 7897  → 按规则分流（国内直连、国外代理）
+浏览器专用 7891 → 全部走代理组（浏览器级"全局"）
+```
+
+然后扩展用 PAC 把 ChatGPT 域名指向 7891，其它网站仍走 7897。
+
+**效果**：只让浏览器里的 ChatGPT 走全局，系统其它程序不受影响。
+
+---
+
+### 配置步骤
+
+#### 1. Clash 侧：加一个 listeners 端口
+
+Clash Verge → **订阅** → 右键 **Merge** → 编辑 → 替换成：
+
+```yaml
+profile:
+  store-selected: true
+
+listeners:
+  - name: browser-global
+    type: mixed
+    port: 7891
+    listen: 127.0.0.1
+    proxy: 一元机场      # ← 改成你订阅里的策略组名
+    udp: true
+```
+
+保存后**重启 Clash Verge**（或点订阅「应用」重新生成配置）。
+
+**验证**：命令行执行 `netstat -ano | findstr :7891`，应该看到监听。
+
+#### 2. 扩展侧：打开开关
+
+弹窗 →「浏览器强制代理」→ 打开开关，端口填 `7891`（默认值）。
+
+#### 3. 验证生效
+
+浏览器打开 ChatGPT，按 F9 打开控制台：
+
+```js
+// 看 PAC 是否生效
+chrome.proxy.settings.get({}, console.log);  // 需要扩展权限，普通页面看不到
+```
+
+更直接的办法：打开 https://www.cloudflare.com/cdn-cgi/trace 看出口 IP，
+与不装扩展时对比，应该不同。
+
+---
+
+### 为什么用 PAC 而不是 fixed_servers
+
+`fixed_servers` 会把**所有**流量强制走代理，等于浏览器全局代理，国内网站也会绕道。
+PAC 可以只对指定域名生效，其它域名返回 `DIRECT` 交给系统代理设置处理。
+
+### 安全性
+
+- PAC 脚本只在扩展内生成，不联网
+- 只对 11 个 ChatGPT 相关域名生效
+- 关闭开关会立即调用 `chrome.proxy.settings.clear()` 恢复系统代理
+
+---
+
 ## 七、常见问题
 
 **Q：安装后没效果？**
