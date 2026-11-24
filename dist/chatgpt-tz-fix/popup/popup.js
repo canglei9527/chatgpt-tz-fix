@@ -38,6 +38,7 @@
     proxyToggle: null,
     proxyPort: null,
     proxyHint: null,
+    autoFollowToggle: null,
     ipRow: null,
     ipValue: null,
     ipHint: null,
@@ -149,6 +150,9 @@
     if (ui.proxyPort) {
       ui.proxyPort.value = String(s.proxyPort || 7891);
       updateProxyHint(!!s.browserProxy);
+    }
+    if (ui.autoFollowToggle) {
+      ui.autoFollowToggle.checked = !!s.autoFollow;
     }
 
     var scopeButtons = ui.scopeSegment.querySelectorAll('[data-scope]');
@@ -512,53 +516,8 @@
    * 隐私：只请求 ipinfo.io/json（一个公开的 IP 归属查询），不带任何标识。
    */
 
-  /** 国家/地区 → 推荐的 IANA 时区（按覆盖人口与代理节点常见度排序） */
-  var COUNTRY_ZONE = {
-    US: 'America/Los_Angeles',     // 美国（默认西海岸；东部用户可手动改 New_York）
-    CA: 'America/Toronto',
-    MX: 'America/Mexico_City',
-    BR: 'America/Sao_Paulo',
-    AR: 'America/Argentina/Salta',
-    GB: 'Europe/London',
-    IE: 'Europe/Dublin',
-    FR: 'Europe/Paris',
-    DE: 'Europe/Berlin',
-    NL: 'Europe/Amsterdam',
-    BE: 'Europe/Brussels',
-    CH: 'Europe/Zurich',
-    AT: 'Europe/Vienna',
-    IT: 'Europe/Rome',
-    ES: 'Europe/Madrid',
-    PT: 'Europe/Lisbon',
-    SE: 'Europe/Stockholm',
-    NO: 'Europe/Oslo',
-    DK: 'Europe/Copenhagen',
-    FI: 'Europe/Helsinki',
-    PL: 'Europe/Warsaw',
-    CZ: 'Europe/Prague',
-    RU: 'Europe/Moscow',
-    TR: 'Europe/Istanbul',
-    UA: 'Europe/Kiev',          // ICU 规范名（Kyiv 是新区名，ICU 仍用 Kiev）
-    AE: 'Asia/Dubai',
-    IL: 'Asia/Jerusalem',
-    IN: 'Asia/Calcutta',
-    SG: 'Asia/Singapore',
-    MY: 'Asia/Kuala_Lumpur',
-    TH: 'Asia/Bangkok',
-    VN: 'Asia/Saigon',          // ICU 规范名（Ho_Chi_Minh 是旧区名）
-    ID: 'Asia/Jakarta',
-    PH: 'Asia/Manila',
-    HK: 'Asia/Hong_Kong',
-    TW: 'Asia/Taipei',
-    KR: 'Asia/Seoul',
-    JP: 'Asia/Tokyo',
-    CN: 'Asia/Shanghai',
-    AU: 'Australia/Sydney',
-    NZ: 'Pacific/Auckland',
-    ZA: 'Africa/Johannesburg',
-    EG: 'Africa/Cairo',
-    NG: 'Africa/Lagos'
-  };
+  /** 国家/地区 → 推荐时区，定义在 shared/geo-zones.js（后台也要用） */
+  var COUNTRY_ZONE = globalThis.DSH_COUNTRY_ZONE || {};
 
   /** 查询出口 IP 与归属地。失败时返回 {ok:false}，绝不抛错。 */
   /*
@@ -756,6 +715,26 @@
     });
   }
 
+  function bindAutoFollow() {
+    if (!ui.autoFollowToggle) return;
+    ui.autoFollowToggle.addEventListener('change', function () {
+      var on = ui.autoFollowToggle.checked;
+      handlePatch({ autoFollow: on }, {
+        message: on ? '已开启自动跟随，换节点后时区会自动切换' : '已关闭自动跟随，需要手动点「跟随代理」'
+      });
+      // 开启时立刻按当前 IP 校准一次
+      if (on) detectExitIp().then(function (info) {
+        if (info && info.ok && info.country) {
+          var zone = zoneForCountry(info.country);
+          if (zone && state.settings && state.settings.zone !== zone) {
+            ui.zoneSelect.value = zone;
+            handlePatch({ zone: zone }, { message: '已自动切换到 ' + zone });
+          }
+        }
+      });
+    });
+  }
+
   function bindBrowserProxy() {
     if (ui.proxyToggle) {
       ui.proxyToggle.addEventListener('change', function () {
@@ -932,6 +911,7 @@
     ui.proxyToggle = document.getElementById('proxyToggle');
     ui.proxyPort = document.getElementById('proxyPort');
     ui.proxyHint = document.getElementById('proxyHint');
+    ui.autoFollowToggle = document.getElementById('autoFollowToggle');
     ui.ipRow = document.getElementById('ipRow');
     ui.ipValue = document.getElementById('ipValue');
     ui.ipHint = document.getElementById('ipHint');
@@ -953,6 +933,7 @@
     bindWebrtc();
     bindFont();
     bindBrowserProxy();
+    bindAutoFollow();
     bindIpDetect();
     bindActions();
 

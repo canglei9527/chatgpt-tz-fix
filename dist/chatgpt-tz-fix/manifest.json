@@ -27,7 +27,8 @@
   "permissions": [
     "storage",
     "scripting",
-    "proxy"
+    "proxy",
+    "alarms"
   ],
   "host_permissions": [
     "<all_urls>"

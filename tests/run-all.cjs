@@ -22,6 +22,7 @@ const SUITES = [
   { file: 'tests/font-guard.test.cjs', name: '中文字体指纹模糊' },
   { file: 'tests/browser-proxy.test.cjs', name: '浏览器级强制代理（PAC）' },
   { file: 'tests/popup-switch.test.cjs', name: '弹窗开关交互' },
+  { file: 'tests/auto-follow.test.cjs', name: '自动跟随代理地区' },
   { file: 'tests/shim-selfcheck.cjs', name: '伪装脚本 vs 真身差分对拍' }
 ];
 

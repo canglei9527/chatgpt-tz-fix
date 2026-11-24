@@ -39,20 +39,13 @@ vm.runInContext(
 );
 const catalog = zoneSandbox.DSH_TZ_ZONES.map(function (z) { return z.zone; });
 
-/* ---------- 从 popup.js 提取 COUNTRY_ZONE ---------- */
-const popupSrc = fs.readFileSync(path.join(ROOT, 'extension/popup/popup.js'), 'utf8');
-const start = popupSrc.indexOf('var COUNTRY_ZONE = {');
-if (start < 0) {
-  console.log('✗ 在 popup.js 中找不到 COUNTRY_ZONE 定义');
+/* ---------- 从 shared/geo-zones.js 读取映射 ---------- */
+const geo = require(path.join(ROOT, 'extension/shared/geo-zones.js'));
+const countryZone = geo.COUNTRY_ZONE;
+if (!countryZone || typeof countryZone !== 'object') {
+  console.log('✗ shared/geo-zones.js 没有导出 COUNTRY_ZONE');
   process.exit(1);
 }
-const end = popupSrc.indexOf('};', start) + 2;
-const mapSrc = popupSrc.slice(start, end);
-
-const mapSandbox = {};
-vm.createContext(mapSandbox);
-vm.runInContext(mapSrc, mapSandbox, { filename: 'country-zone.js' });
-const countryZone = mapSandbox.COUNTRY_ZONE;
 
 console.log('== 出口 IP → 时区映射测试 ==');
 console.log('');

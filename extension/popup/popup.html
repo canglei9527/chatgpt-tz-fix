@@ -66,6 +66,17 @@
     </div>
     <p class="ip-hint" id="ipHint">点「跟随代理」自动把时区设成与你出口 IP 一致</p>
 
+    <label class="toggle-row auto-follow-row">
+      <span class="toggle-text">
+        <span class="toggle-title">自动跟随代理地区</span>
+        <span class="toggle-sub">检测到出口 IP 变化时，自动把时区切到对应城市</span>
+      </span>
+      <span class="switch small">
+        <input id="autoFollowToggle" type="checkbox" role="switch" aria-label="自动跟随代理地区">
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+      </span>
+    </label>
+
     <div class="search-wrap">
       <input id="zoneSearch" class="search" type="search" placeholder="搜索时区，例如 洛杉矶 / tokyo" autocomplete="off" spellcheck="false">
     </div>
@@ -155,6 +166,7 @@
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-<script src="popup.js"></script>
+<script src="../shared/geo-zones.js"></script>
+  <script src="popup.js"></script>
 </body>
 </html>

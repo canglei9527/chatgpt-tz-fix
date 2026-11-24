@@ -461,3 +461,11 @@ html, body {
   outline: none;
 }
 .port-input:focus { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+
+/* ---------- 自动跟随 ---------- */
+
+.auto-follow-row {
+  margin: 10px 0 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}

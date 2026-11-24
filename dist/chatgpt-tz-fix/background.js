@@ -2,6 +2,7 @@
 'use strict';
 
 importScripts('shared/zones.js');
+importScripts('shared/geo-zones.js');
 
 /** 动态内容脚本的固定 id */
 const SCRIPT_ID = 'tz-main';
@@ -28,7 +29,13 @@ const DEFAULT_STATE = Object.freeze({
    */
   browserProxy: false,
   // Clash 专用监听端口（对应 Clash 配置里的 listeners）
-  proxyPort: 7891
+  proxyPort: 7891,
+  /*
+   * 自动跟随代理地区。
+   * 开启后每次 service worker 启动 / 弹窗打开时，自动查询出口 IP 归属地，
+   * 把时区切到匹配的城市 —— 不用用户手动点「跟随代理」。
+   */
+  autoFollow: false
 });
 /** 允许的生效范围 */
 const SCOPES = Object.freeze(['chatgpt', 'all']);
@@ -75,7 +82,8 @@ function normalizeState(input) {
   const proxyPort = (Number.isInteger(source.proxyPort) && source.proxyPort > 0 && source.proxyPort < 65536)
     ? source.proxyPort
     : DEFAULT_STATE.proxyPort;
-  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc, font, browserProxy, proxyPort };
+  const autoFollow = typeof source.autoFollow === 'boolean' ? source.autoFollow : DEFAULT_STATE.autoFollow;
+  return { v: DEFAULT_STATE.v, enabled, zone, scope, webrtc, font, browserProxy, proxyPort, autoFollow };
 }
 
 /** 单条校验：返回错误文案，通过返回 null */
@@ -89,6 +97,7 @@ function validatePatch(patch) {
   if ('proxyPort' in patch && (!Number.isInteger(patch.proxyPort) || patch.proxyPort < 1 || patch.proxyPort > 65535)) {
     return '代理端口必须是 1-65535 的整数';
   }
+  if ('autoFollow' in patch && typeof patch.autoFollow !== 'boolean') return 'autoFollow 必须是布尔值';
   if ('zone' in patch && !findZone(patch.zone)) return '未知时区：' + String(patch.zone);
   return null;
 }
@@ -280,6 +289,170 @@ async function applyRegistration(stateInput) {
     console.warn('[tz-fix] 注册内容脚本失败：' + message);
     return false;
   }
+}
+
+/* ==================== 自动跟随代理地区 ==================== */
+
+/*
+ * 用途
+ *   用户换了代理节点（比如从美国洛杉矶切到日本东京），时区还是旧的城市，
+ *   IP 和时区就对不上了 —— 那正是「位置矛盾」的风控信号。
+ *   手动点「跟随代理」很麻烦，这里做全自动。
+ *
+ * 什么时候检测
+ *   1. service worker 启动时（浏览器打开、扩展重载）
+ *   2. chrome.runtime.onStartup
+ *   3. 每次 alert（chrome.alarms 定时，默认 30 分钟）
+ *   4. 弹窗打开请求 getState 时（用户主动看，顺便校准一次）
+ *
+ * 只在「查到的时区与当前不同」时才写存储并重新注册，避免无谓的抖动。
+ */
+
+/** 定时检测周期（分钟） */
+const AUTO_FOLLOW_PERIOD_MIN = 30;
+const AUTO_FOLLOW_ALARM = 'tz-auto-follow';
+
+/** 记录最近一次自动检测结果，供弹窗展示 */
+let lastAutoFollow = { at: 0, ip: '', country: '', zone: '', changed: false, error: null };
+
+/** 查询出口 IP 与归属地（与 popup 里的实现保持同一套接口） */
+async function fetchExitIp() {
+  const endpoints = [
+    {
+      url: 'https://ipinfo.io/json',
+      parse: function (d) { return { ip: d.ip, country: d.country, region: d.region, city: d.city }; }
+    },
+    {
+      url: 'https://www.cloudflare.com/cdn-cgi/trace',
+      parse: function (text) {
+        const map = {};
+        String(text).split('\n').forEach(function (line) {
+          const i = line.indexOf('=');
+          if (i > 0) map[line.slice(0, i)] = line.slice(i + 1);
+        });
+        return { ip: map.ip, country: map.loc, region: '', city: '' };
+      },
+      isText: true
+    }
+  ];
+
+  let fallbackIp = '';
+
+  for (let i = 0; i < endpoints.length; i += 1) {
+    const ep = endpoints[i];
+    try {
+      const res = await withTimeout(fetch(ep.url, { cache: 'no-store' }), 6000, null);
+      if (!res || !res.ok) continue;
+      const raw = ep.isText ? await withTimeout(res.text(), 4000, '') : await withTimeout(res.json(), 4000, null);
+      if (!raw) continue;
+      const info = ep.parse(raw) || {};
+      const ip = info.ip || '';
+      const country = String(info.country || '').toUpperCase();
+      if (!ip) continue;
+      if (!country) { if (!fallbackIp) fallbackIp = ip; continue; }
+      return { ok: true, ip, country, region: info.region || '', city: info.city || '', source: ep.url };
+    } catch (err) { /* 试下一个 */ }
+  }
+
+  if (fallbackIp) return { ok: true, ip: fallbackIp, country: '', region: '', city: '', countryUnknown: true };
+  return { ok: false, error: '所有 IP 查询接口均失败' };
+}
+
+/** 国家代码 → 时区；映射表在 shared/geo-zones.js */
+function zoneForCountry(country) {
+  if (!country) return null;
+  const map = globalThis.DSH_COUNTRY_ZONE || {};
+  const zone = map[String(country).toUpperCase()];
+  if (!zone) return null;
+  return findZone(zone) ? zone : null;
+}
+
+/**
+ * 执行一次自动跟随。
+ *
+ * 返回 { checked, changed, from, to, ip, country, reason }
+ * 任何失败都只是记录，不抛错 —— 自动跟随失败不该影响正常使用。
+ */
+async function runAutoFollow(stateInput) {
+  const state = stateInput || await readState();
+
+  if (!state.enabled) return { checked: false, reason: '扩展已关闭' };
+  if (!state.autoFollow) return { checked: false, reason: '未开启自动跟随' };
+
+  const info = await fetchExitIp();
+  lastAutoFollow.at = Date.now();
+
+  if (!info.ok) {
+    lastAutoFollow.error = info.error || '查询失败';
+    return { checked: true, changed: false, error: lastAutoFollow.error };
+  }
+
+  lastAutoFollow.ip = info.ip;
+  lastAutoFollow.country = info.country;
+  lastAutoFollow.error = null;
+
+  const zone = zoneForCountry(info.country);
+  if (!zone) {
+    lastAutoFollow.error = info.country ? ('没有 ' + info.country + ' 的时区映射') : '识别不出地区';
+    return { checked: true, changed: false, ip: info.ip, country: info.country, error: lastAutoFollow.error };
+  }
+
+  lastAutoFollow.zone = zone;
+
+  // 已经一致，什么都不做
+  if (state.zone === zone) {
+    lastAutoFollow.changed = false;
+    return { checked: true, changed: false, ip: info.ip, country: info.country, zone, reason: 'already-matched' };
+  }
+
+  // 切换：写存储 + 重新注册内容脚本
+  const next = normalizeState({ ...state, zone });
+  await writeState(next);
+  lastKnownState = next;
+  await ensureRegistered(next);
+  await updateBadge(next.enabled);
+
+  lastAutoFollow.changed = true;
+  console.log('[tz-fix] 自动跟随：' + state.zone + ' → ' + zone + '（IP ' + info.ip + ' / ' + info.country + '）');
+
+  return {
+    checked: true,
+    changed: true,
+    from: state.zone,
+    to: zone,
+    ip: info.ip,
+    country: info.country
+  };
+}
+
+/** 串行化自动跟随，避免并发写入互相覆盖 */
+let autoFollowQueue = Promise.resolve();
+function scheduleAutoFollow(reason) {
+  autoFollowQueue = autoFollowQueue
+    .then(function () { return runAutoFollow(); })
+    .then(function (r) {
+      if (r && r.changed) {
+        console.log('[tz-fix] 自动跟随完成（' + reason + '）：' + r.from + ' → ' + r.to);
+      }
+      return r;
+    })
+    .catch(function (err) {
+      console.warn('[tz-fix] 自动跟随失败（' + reason + '）：' + (err && err.message));
+      return null;
+    });
+  return autoFollowQueue;
+}
+
+/** 建立 / 拆除定时检测 */
+async function syncAutoFollowAlarm(enabled) {
+  try {
+    if (!chrome.alarms) return;
+    if (enabled) {
+      await chrome.alarms.create(AUTO_FOLLOW_ALARM, { periodInMinutes: AUTO_FOLLOW_PERIOD_MIN });
+    } else {
+      await chrome.alarms.clear(AUTO_FOLLOW_ALARM);
+    }
+  } catch (err) { /* 忽略 */ }
 }
 
 /* ==================== 浏览器级强制代理（chrome.proxy） ==================== */
@@ -541,6 +714,12 @@ async function handleMessage(message, sender) {
         if (registered) registered = await isScriptRegistered();
       }
 
+      /*
+       * 打开弹窗时顺手校准一次时区（不 await，避免弹窗打开变慢）。
+       * 弹窗会通过 storage.onChanged 收到更新，然后自动刷新界面。
+       */
+      if (read.state.autoFollow) scheduleAutoFollow('popup-open');
+
       return {
         ok: true,
         state: read.state,
@@ -555,6 +734,8 @@ async function handleMessage(message, sender) {
           matches: lastRegistration.matches,
           browserProxyActive: !!(read.state.browserProxy && chrome.proxy),
           proxyPort: read.state.proxyPort,
+          // 最近一次自动跟随的结果，弹窗可展示
+          autoFollow: lastAutoFollow,
         },
       };
     }
@@ -578,6 +759,13 @@ async function handleMessage(message, sender) {
       lastKnownState = next;
       await ensureRegistered(next);
       await applyBrowserProxy(next);
+      await syncAutoFollowAlarm(next.autoFollow);
+
+      // 刚打开自动跟随时立刻跑一次，用户马上能看到效果
+      if (next.autoFollow && !read.state.autoFollow) {
+        scheduleAutoFollow('enabled');
+      }
+
       return { ok: true, state: next };
     }
     case 'diagnose': {
@@ -676,6 +864,13 @@ async function init() {
     await ensureRegistered(state);
     await applyBrowserProxy(state);
     await updateBadge(state.enabled);
+    await syncAutoFollowAlarm(state.autoFollow);
+
+    /*
+     * SW 启动时校准一次。不 await：自动跟随要联网，
+     * 不能让它阻塞扩展初始化（否则弹窗第一次打开会很慢）。
+     */
+    if (state.autoFollow) scheduleAutoFollow('sw-start');
   } catch (err) {
     console.warn('[tz-fix] 初始化失败：', err && err.message);
   }
@@ -694,6 +889,17 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 /*
+ * 定时校准：用户换了代理节点后，最多 30 分钟内自动把时区跟上。
+ * （浏览器打开、弹窗打开时也会立即校准一次，这里只是兜底。）
+ */
+if (chrome.alarms && chrome.alarms.onAlarm) {
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    if (!alarm || alarm.name !== AUTO_FOLLOW_ALARM) return;
+    scheduleAutoFollow('alarm');
+  });
+}
+
+/*
  * Service worker 每次被唤醒都会执行到这里。
  * MV3 下 onInstalled / onStartup 并不覆盖所有唤醒场景（点扩展页"重新加载"、
  * SW 因消息唤醒等），所以这里主动跑一次注册，保证任何路径下内容脚本都在。
@@ -707,6 +913,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   // applyRegistration 内部已负责更新徽标，这里不再重复调用
   ensureRegistered(next);
   applyBrowserProxy(next);
+  syncAutoFollowAlarm(next.autoFollow);
 });
 
 // 仅用于单元测试的稳定性入口（浏览器运行时不产生副作用）
@@ -718,6 +925,10 @@ globalThis.__DSH_TZ_BG__ = Object.freeze({
   validatePatch,
   resolveMatches,
   resolveFiles,
+  runAutoFollow,
+  fetchExitIp,
+  zoneForCountry,
+  lastAutoFollow,
   ensureRegistered,
   readState,
   writeState,
