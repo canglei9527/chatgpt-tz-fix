@@ -64,18 +64,44 @@
 
   /* ============================ 基础工具 ============================ */
 
+  /*
+   * 与后台通信。
+   *
+   * 必须有超时！MV3 的 service worker 会被浏览器休眠/回收，
+   * 此时 sendMessage 的回调可能永远不触发 —— 表现为弹窗一直空白、
+   * 点图标没反应（因为 init 卡在 loadZones 的 Promise 上）。
+   *
+   * 超时后返回一个明确错误，让界面能继续渲染（用默认值兜底），
+   * 而不是整片空白。
+   */
+  var SEND_TIMEOUT_MS = 5000;
+
   function send(message) {
     return new Promise(function (resolve) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        resolve({ ok: false, error: '后台无响应（可能已休眠），请重试', timeout: true });
+      }, SEND_TIMEOUT_MS);
+
+      function finish(value) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      }
+
       try {
         chrome.runtime.sendMessage(message, function (response) {
           if (chrome.runtime.lastError) {
-            resolve({ ok: false, error: chrome.runtime.lastError.message });
+            finish({ ok: false, error: chrome.runtime.lastError.message });
             return;
           }
-          resolve(response || { ok: false, error: '后台无响应' });
+          finish(response || { ok: false, error: '后台无响应' });
         });
       } catch (err) {
-        resolve({ ok: false, error: String((err && err.message) || err) });
+        finish({ ok: false, error: String((err && err.message) || err) });
       }
     });
   }
@@ -565,6 +591,18 @@
   ];
 
   function detectExitIp() {
+    /*
+     * 整体超时：4 个接口串行、每个 4.5 秒的话最坏要 18 秒，
+     * 弹窗那边早就等不及了。这里给整体加 6 秒上限，
+     * 超时后直接返回「检测失败」，让界面显示"未检测"。
+     */
+    var totalTimer = null;
+    var overall = new Promise(function (resolve) {
+      totalTimer = setTimeout(function () {
+        resolve({ ok: false, error: '检测超时', timeout: true });
+      }, 6000);
+    });
+
     function tryNext(i, fallbackIp) {
       if (i >= IP_ENDPOINTS.length) {
         // 一个都没拿到国家，但至少有 IP 的话也返回，界面会提示手动选
@@ -573,10 +611,50 @@
       }
 
       var ep = IP_ENDPOINTS[i];
-      return fetch(ep.url, { cache: 'no-store' })
+
+      /*
+       * 必须带超时！
+       * 代理节点不通时 fetch 会挂起几十秒，而 init() 在等这个 Promise，
+       * 表现就是「弹窗一片空白 / 点图标没反应」。
+       * 用 AbortController 硬性掐断（老版本 Chrome 不支持就退回普通 fetch）。
+       */
+      var controller = null;
+      var signal = undefined;
+      try {
+        if (typeof AbortController === 'function') {
+          controller = new AbortController();
+          signal = controller.signal;
+        }
+      } catch (err) { controller = null; }
+
+      /*
+       * 双重超时保护：
+       *   ① AbortController 主动掐断请求（能真正释放连接）
+       *   ② Promise.race 硬超时（即使浏览器不响应 abort，也能让上层继续走）
+       * 只有 ① 不够 —— 某些环境下 abort 不生效，Promise 仍然挂着。
+       */
+      var abortTimer = setTimeout(function () {
+        if (controller) { try { controller.abort(); } catch (err) { /* 忽略 */ } }
+      }, 4000);
+
+      function clearAbortTimer() { clearTimeout(abortTimer); }
+
+      var hardTimeout = new Promise(function (resolve) {
+        setTimeout(function () { resolve({ __timeout: true }); }, 4500);
+      });
+
+      var request = fetch(ep.url, { cache: 'no-store', signal: signal })
         .then(function (res) {
           if (!res.ok) throw new Error('HTTP ' + res.status);
           return ep.isText ? res.text() : res.json();
+        })
+        .catch(function (e) { throw e; });
+
+      return Promise.race([request, hardTimeout])
+        .then(function (v) {
+          clearAbortTimer();
+          if (v && v.__timeout) throw new Error('请求超时');
+          return v;
         })
         .then(function (raw) {
           var info = ep.parse(raw) || {};
@@ -598,7 +676,15 @@
         })
         .catch(function () { return tryNext(i + 1, fallbackIp); });
     }
-    return tryNext(0, '');
+    var work = tryNext(0, '').then(function (r) {
+      clearTimeout(totalTimer);
+      return r;
+    }).catch(function (e) {
+      clearTimeout(totalTimer);
+      return { ok: false, error: String((e && e.message) || e) };
+    });
+
+    return Promise.race([work, overall]);
   }
 
   /** 把国家代码映射成时区；没有映射时返回 null */
@@ -941,13 +1027,35 @@
       try { ui.version.textContent = 'v' + chrome.runtime.getManifest().version; } catch (err) { ui.version.textContent = 'v—'; }
     }
 
+    /*
+     * 先渲染一次，用兜底数据把界面画出来。
+     *
+     * 为什么要这样：loadZones / readState 都要走 chrome.runtime.sendMessage，
+     * 如果后台 SW 被回收，这些 Promise 会一直等（即使加了超时也要 5 秒）。
+     * 用户点图标看到一片空白，会以为扩展坏了。
+     * 所以先用默认值把界面填满，等真实数据回来再刷新一次。
+     */
+    state.settings = Object.assign({}, FALLBACK_STATE);
+    state.meta = state.meta || {};
+    try {
+      renderZones('');
+      renderStatus();
+      startClock();
+    } catch (err) {
+      // 渲染兜底失败也不能让 init 挂掉
+      console.warn('[tz-fix] 首屏渲染失败：', err);
+    }
+
     loadZones().then(function (zones) {
-      state.zones = zones.length ? zones : [{ zone: FALLBACK_STATE.zone, label: FALLBACK_STATE.zone, slug: 'america_los_angeles', recommended: true }];
+      state.zones = (zones && zones.length) ? zones : [{ zone: FALLBACK_STATE.zone, label: FALLBACK_STATE.zone, slug: 'america_los_angeles', recommended: true }];
       return readState();
     }).then(function (res) {
       if (!applyStateResponse(res)) {
-        state.settings = Object.assign({}, FALLBACK_STATE);
-        state.meta = state.meta || {};
+        // 后台没响应：保留首屏渲染用的兜底值，不要清空
+        state.settings = state.settings || Object.assign({}, FALLBACK_STATE);
+        if (res && res.timeout) {
+          toast('后台未响应，显示的是上次的设置');
+        }
       }
       renderZones('');
       renderStatus();
@@ -955,13 +1063,25 @@
 
       /*
        * 打开弹窗时静默查一次出口 IP，只用于显示一致性提示，**不自动改时区**。
-       * 自动改会让用户莫名其妙——必须由用户点「跟随代理」明确触发。
+       *
+       * 注意：这一步必须完全异步、且失败/超时都不影响界面。
+       * 早期版本这里没有超时，代理不通时 fetch 挂起几十秒，
+       * 而界面看起来就像整个扩展卡死了。
+       * 现在 detectExitIp 内部有 4 秒超时，这里再包一层 catch 兜底。
        */
-      ui.ipValue.textContent = '查询中…';
-      detectExitIp().then(function (info) {
-        if (info.ok) renderIpCard(info);
-        else ui.ipValue.textContent = '未检测';
-      });
+      try {
+        if (ui.ipValue) ui.ipValue.textContent = '查询中…';
+        detectExitIp()
+          .then(function (info) {
+            if (info && info.ok) renderIpCard(info);
+            else if (ui.ipValue) ui.ipValue.textContent = '未检测';
+          })
+          .catch(function () {
+            if (ui.ipValue) ui.ipValue.textContent = '未检测';
+          });
+      } catch (err) {
+        if (ui.ipValue) ui.ipValue.textContent = '未检测';
+      }
     }).catch(function (err) {
       toast('初始化失败：' + ((err && err.message) || err));
     });

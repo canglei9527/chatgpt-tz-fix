@@ -123,7 +123,11 @@ const lastRegistration = { ok: false, error: null, at: null, files: null, matche
  */
 async function readState() {
   try {
-    const got = await chrome.storage.local.get('settings');
+    /*
+     * storage.local.get 正常是毫秒级，但如果扩展数据损坏或浏览器
+     * 正在做清理，它可能长时间不返回。加超时保证 getState 一定有响应。
+     */
+    const got = await withTimeout(chrome.storage.local.get('settings'), 3000, null);
     const state = normalizeState(got && got.settings);
     lastKnownState = state;
     return state;
@@ -137,7 +141,11 @@ async function readState() {
 /** 读取设置，并告诉调用方这次是否读成功（失败时调用方不应写回） */
 async function readStateChecked() {
   try {
-    const got = await chrome.storage.local.get('settings');
+    const got = await withTimeout(chrome.storage.local.get('settings'), 3000, null);
+    if (!got) {
+      // 超时：标记为失败，调用方不应在此基础上写回
+      return { ok: false, state: lastKnownState || normalizeState(null) };
+    }
     const state = normalizeState(got && got.settings);
     lastKnownState = state;
     return { ok: true, state };
@@ -149,7 +157,7 @@ async function readStateChecked() {
 
 /** 写入设置 */
 async function writeState(state) {
-  await chrome.storage.local.set({ settings: state });
+  await withTimeout(chrome.storage.local.set({ settings: state }), 4000, null);
   return state;
 }
 
@@ -569,7 +577,16 @@ async function applyBrowserProxy(state) {
 /** 查询内容脚本是否已注册 */
 async function isScriptRegistered() {
   try {
-    const scripts = await chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] });
+    /*
+     * 加超时：getState 会 await 这里，如果 chrome API 卡住，
+     * 整个 getState 就永远不返回，弹窗表现为"一直加载中/点图标没反应"。
+     */
+    const scripts = await withTimeout(
+      chrome.scripting.getRegisteredContentScripts({ ids: [SCRIPT_ID] }),
+      3000,
+      null
+    );
+    if (!scripts) return false;
     return Array.isArray(scripts) && scripts.some((item) => item && item.id === SCRIPT_ID);
   } catch (err) {
     return false;
@@ -777,7 +794,8 @@ async function handleMessage(message, sender) {
       const registered = await isScriptRegistered();
       const scripts = await (async () => {
         try {
-          return await chrome.scripting.getRegisteredContentScripts();
+          const got = await withTimeout(chrome.scripting.getRegisteredContentScripts(), 3000, null);
+          return got || [];
         } catch (err) {
           return [];
         }
